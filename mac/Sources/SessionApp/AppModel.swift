@@ -11,13 +11,25 @@ final class AppModel: ObservableObject {
     @Published var categories: [Category] = []
     @Published var entries: [Entry] = []
     @Published var pendingCompletion: CompletedFocus?
-    @Published var finishedToday: [CompletedFocus] = []
+    /// 临时兼容属性：TodayView 在 D8 改为读取 todaySessions 后删除。
+    var finishedToday: [CompletedFocus] { [] }
+    @Published var todaySessions: [SessionRecord] = []
+    @Published var unsynced = 0
+    @Published var accessibilityMissing = false
     @Published var errorMessage: String?
 
     let engine: TimerEngine
     private let api: APIClient?
     /// deinit 非隔离，需要访问 Timer；Timer 只在主 actor 上创建，deinit 时已无其他引用。
     private nonisolated(unsafe) var ticker: Timer?
+    private nonisolated(unsafe) var syncTimer: Timer?
+    private nonisolated(unsafe) var sampleTimer: Timer?
+    private nonisolated(unsafe) var activationObserver: NSObjectProtocol?
+
+    private let store: LocalStore?
+    private let tracker: ActivityTracker?
+    private let sync: SyncService?
+    private var askedAccessibility = false
 
     /// 默认 25 分钟；开发时可用环境变量 SESSION_FOCUS_SECONDS=10 快速走完整流程。
     private let focusSeconds = Int(ProcessInfo.processInfo.environment["SESSION_FOCUS_SECONDS"] ?? "") ?? 25 * 60
@@ -31,6 +43,17 @@ final class AppModel: ObservableObject {
         }
         if api == nil { errorMessage = "未配置 SESSION_API_TOKEN，无法加载 Todoist 任务（仍可使用自定义条目）" }
 
+        let dbPath = env["SESSION_DB_PATH"] ?? Self.defaultDBPath()
+        store = try? LocalStore(path: dbPath)
+        if store == nil { errorMessage = "无法打开本地数据库，专注记录不会保存" }
+        let blocklist = Self.loadBlocklist(env: env)
+        tracker = store.map {
+            ActivityTracker(sampler: MacActivitySampler(), enforcer: MacBlockEnforcer(), store: $0,
+                            clock: SystemClock(), blocklist: blocklist)
+        }
+        if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
+
+        // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
         if let recovered = engine.recovered { complete(recovered) }
         engine.onCompleted = { [weak self] done in
             // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
@@ -42,10 +65,39 @@ final class AppModel: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         ticker = timer
+
+        var activeId: String?
+        if case .focusing(let run) = engine.phase {
+            activeId = run.id.uuidString.lowercased()
+            tracker?.start(run: run)
+            startSampling()
+        }
+        try? store?.pruneOrphanSpans(keeping: activeId)
+        reloadToday()
+
+        let sync = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.sync?.isDue == true else { return }
+                await self.flushSync()
+            }
+        }
+        RunLoop.main.add(sync, forMode: .common)
+        syncTimer = sync
+
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in Task { @MainActor in self?.tracker?.sample() } }
+
+        Task { await flushSync() }
         Task { await refresh() }
     }
 
-    deinit { ticker?.invalidate() }
+    deinit {
+        ticker?.invalidate()
+        syncTimer?.invalidate()
+        sampleTimer?.invalidate()
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+    }
 
     // MARK: 展示
 
@@ -93,8 +145,13 @@ final class AppModel: ObservableObject {
         if started { remember(title: title, categoryId: categoryId) }
     }
 
-    /// 放弃 = 丢弃：不进入 finishedToday，不计入统计。
-    func abandon() { engine.abandon(); objectWillChange.send() }
+    /// 放弃 = 丢弃：不写入本地 session，不计入统计，已采集的 span 一并删除。
+    func abandon() {
+        tracker?.discard(); stopSampling()
+        engine.abandon(); objectWillChange.send()
+    }
+
+    func spans(for sessionId: String) -> [ActivitySpan] { (try? store?.spans(sessionId: sessionId)) ?? [] }
 
     func startBreak() {
         let kind = engine.suggestedBreak
@@ -155,7 +212,11 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func begin(_ spec: FocusSpec) -> Bool {
         defer { objectWillChange.send() }
-        do { try engine.start(spec); pendingCompletion = nil; return true }
+        do {
+            try engine.start(spec); pendingCompletion = nil
+            if case .focusing(let run) = engine.phase { tracker?.start(run: run); startSampling() }
+            return true
+        }
         catch { errorMessage = "已有进行中的专注或休息"; return false }
     }
 
@@ -169,9 +230,55 @@ final class AppModel: ObservableObject {
     }
 
     private func complete(_ done: CompletedFocus) {
-        finishedToday.append(done)
+        tracker?.stop(at: done.endedAt); stopSampling()
+        try? store?.save(SessionRecord(done))
         pendingCompletion = done
+        reloadToday()
         objectWillChange.send()
+        Task { await flushSync() }
+    }
+
+    private func startSampling() {
+        sampleTimer?.invalidate()
+        let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tracker?.sample() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        sampleTimer = t
+        if !askedAccessibility && !Permissions.accessibilityGranted {
+            askedAccessibility = true
+            Permissions.requestAccessibility()
+        }
+        accessibilityMissing = !Permissions.accessibilityGranted
+    }
+
+    private func stopSampling() { sampleTimer?.invalidate(); sampleTimer = nil }
+
+    private func flushSync() async {
+        guard let sync else { return }
+        await sync.flush()
+        unsynced = (try? store?.pendingCount()) ?? 0
+        reloadToday()
+    }
+
+    private func reloadToday() {
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        todaySessions = (try? store?.sessions(from: start, to: end)) ?? []
+    }
+
+    private static func defaultDBPath() -> String {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("Session", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("session.db").path
+    }
+
+    private static func loadBlocklist(env: [String: String]) -> BlockList {
+        let fromEnv = BlockList(appsCSV: env["SESSION_BLOCK_APPS"] ?? "", domainsCSV: env["SESSION_BLOCK_DOMAINS"] ?? "")
+        let saved = UserDefaults.standard.data(forKey: "blocklist")
+            .flatMap { try? JSONDecoder().decode(BlockList.self, from: $0) } ?? BlockList()
+        return saved.merged(with: fromEnv)
     }
 
     private func tick() {
