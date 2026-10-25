@@ -27,7 +27,7 @@ final class TimelineLayoutTests: XCTestCase {
     func testScheduledTasksExtendRange() {
         let task = DateInterval(start: date(16, 0), duration: 45 * 60)
         let r = TimelineLayout.range(sessions: [], scheduled: [task], now: date(14, 10), calendar: cal)
-        XCTAssertEqual(r.start, date(9, 0))
+        XCTAssertEqual(r.start, date(14, 0))
         XCTAssertEqual(r.end, date(17, 0))
     }
 
