@@ -9,6 +9,7 @@ enum Browser {
         "company.thebrowser.Browser": .init(appName: "Arc", tab: "active tab of front window"),
         "com.microsoft.edgemac": .init(appName: "Microsoft Edge", tab: "active tab of front window"),
         "com.brave.Browser": .init(appName: "Brave Browser", tab: "active tab of front window"),
+        "com.vivaldi.Vivaldi": .init(appName: "Vivaldi", tab: "active tab of front window"),
     ]
 
     /// 返回当前标签页 URL；无权限/无窗口时返回 nil。必须在主线程调用（NSAppleScript 非线程安全）。
