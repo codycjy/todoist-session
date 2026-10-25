@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     @Published var unsynced = 0
     @Published var accessibilityMissing = false
     @Published var errorMessage: String?
+    /// 今日 session 的 LLM 评估（sessionId → 评估）。
+    @Published var evaluations: [String: Evaluation] = [:]
 
     let engine: TimerEngine
     private let api: APIClient?
@@ -31,6 +33,7 @@ final class AppModel: ObservableObject {
     private let tracker: ActivityTracker?
     private let sync: SyncService?
     private var askedAccessibility = false
+    private var evaluationPoll: Task<Void, Never>?
 
     /// 默认 25 分钟；开发时可用环境变量 SESSION_FOCUS_SECONDS=10 快速走完整流程。
     private let focusSeconds = Int(ProcessInfo.processInfo.environment["SESSION_FOCUS_SECONDS"] ?? "") ?? 25 * 60
@@ -200,6 +203,40 @@ final class AppModel: ObservableObject {
         errorMessage = failures.isEmpty ? nil : Self.describe(failures)
     }
 
+    /// 拉取今日评估。未配置后端或离线时静默：不改错误条，保留已有数据。
+    func refreshEvaluations() async {
+        guard let api else { return }
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        if let sessions = try? await api.sessions(from: start, to: end) {
+            evaluations.merge(EvaluationDisplay.evaluations(from: sessions)) { _, new in new }
+        }
+        updateEvaluationPolling()
+    }
+
+    /// 失败的评估重新排队后立即重新拉取；失败时静默。
+    func retryEvaluation(sessionId: String) async {
+        guard let api else { return }
+        try? await api.retryEvaluation(id: sessionId)
+        await refreshEvaluations()
+    }
+
+    /// 有 pending 时每 15 秒轮询一次，全部终态后停止。
+    private func updateEvaluationPolling() {
+        let needed = EvaluationDisplay.needsPolling(evaluations, sessionIds: todaySessions.map(\.id))
+        if !needed {
+            evaluationPoll?.cancel(); evaluationPoll = nil
+        } else if evaluationPoll == nil {
+            evaluationPoll = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(15))
+                    guard !Task.isCancelled, let self else { return }
+                    await self.refreshEvaluations()
+                }
+            }
+        }
+    }
+
     private static func describe(_ failures: [Error]) -> String {
         for error in failures {
             if case let APIError.server(_, code) = error {
@@ -266,6 +303,7 @@ final class AppModel: ObservableObject {
         await sync.flush()
         unsynced = (try? store?.pendingCount()) ?? 0
         reloadToday()
+        await refreshEvaluations()
     }
 
     private func reloadToday() {

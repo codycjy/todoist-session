@@ -15,6 +15,7 @@ struct TodayView: View {
             left.frame(minWidth: 340)
             right.frame(minWidth: 300)
         }
+        .task { await model.refreshEvaluations() }
         .toolbar {
             ToolbarItem {
                 Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }

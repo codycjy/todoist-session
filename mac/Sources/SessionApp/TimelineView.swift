@@ -121,6 +121,9 @@ struct FocusTimelineView: View {
                 if session.syncState == .pending {
                     Image(systemName: "icloud.slash").font(.caption2).padding(3)
                         .help("未同步").accessibilityLabel("未同步")
+                } else if let badge = EvaluationDisplay.badge(for: model.evaluations[session.id]) {
+                    Text(badge).font(.caption2.bold()).monospacedDigit().padding(3)
+                        .help("专注度评分").accessibilityLabel("专注度 \(badge)")
                 }
             }
             .frame(height: block.height)
@@ -130,7 +133,10 @@ struct FocusTimelineView: View {
         .buttonStyle(.plain)
         .popover(isPresented: Binding(get: { selected == session.id },
                                       set: { if !$0 { selected = nil } })) {
-            SessionDetail(session: session, spans: model.spans(for: session.id))
+            SessionDetail(session: session, spans: model.spans(for: session.id),
+                          evaluation: model.evaluations[session.id]) {
+                Task { await model.retryEvaluation(sessionId: session.id) }
+            }
         }
     }
 }
@@ -138,6 +144,8 @@ struct FocusTimelineView: View {
 private struct SessionDetail: View {
     let session: SessionRecord
     let spans: [ActivitySpan]
+    let evaluation: Evaluation?
+    let onRetry: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -145,6 +153,7 @@ private struct SessionDetail: View {
             Text("\(session.startedAt, format: .dateTime.hour().minute())–\(session.endedAt, format: .dateTime.hour().minute())　实际 \(session.actualSeconds / 60) 分钟")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
+            if let evaluation { evaluationView(evaluation) }
             if spans.isEmpty {
                 Text("没有采集到活动（可能未授权辅助功能）").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -162,6 +171,32 @@ private struct SessionDetail: View {
         }
         .padding(12)
         .frame(width: 320)
+    }
+
+    @ViewBuilder private func evaluationView(_ evaluation: Evaluation) -> some View {
+        switch evaluation.status {
+        case .pending:
+            Text("评估中…").font(.caption).foregroundStyle(.secondary)
+        case .failed:
+            HStack {
+                Text("评估失败").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("重新评估", action: onRetry).controlSize(.small)
+            }
+        case .done:
+            if let summary = evaluation.summary { Text(summary).font(.callout) }
+            if !evaluation.distractions.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("偏离片段").font(.caption.bold())
+                    ForEach(Array(evaluation.distractions.enumerated()), id: \.offset) { _, d in
+                        let f = Date.FormatStyle().hour().minute()
+                        Text("\(d.start.formatted(f))–\(d.end.formatted(f))  \(d.reason)")
+                            .font(.caption).monospacedDigit()
+                    }
+                }
+            }
+        }
+        Divider()
     }
 
     private func line(_ span: ActivitySpan) -> String {
