@@ -8,18 +8,13 @@ struct MainView: View {
     var body: some View {
         TabView {
             TodayView().tabItem { Label("今日", systemImage: "timer") }
-            StatsPlaceholderView().tabItem { Label("统计", systemImage: "chart.bar") }
+            StatsView().tabItem { Label("统计", systemImage: "chart.bar") }
             SettingsView().tabItem { Label("设置", systemImage: "gearshape") }
         }
         .sheet(isPresented: $showGuide) {
             PermissionGuideView().environmentObject(model)
         }
     }
-}
-
-/// M-C 会替换为真正的统计页。
-struct StatsPlaceholderView: View {
-    var body: some View { Text("统计") }
 }
 
 enum PermissionGuide {
