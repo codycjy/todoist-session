@@ -1,0 +1,12 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8787:8787"
+    environment:
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+    volumes:
+      - session-data:/data
+    restart: unless-stopped
+volumes:
+  session-data:
