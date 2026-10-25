@@ -311,6 +311,7 @@ final class AppModel: ObservableObject {
         tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
         try? store?.save(SessionRecord(done))
         pendingCompletion = done
+        Notifier.focusCompleted(title: done.run.title)
         reloadToday()
         objectWillChange.send()
         Task { await flushSync() }
