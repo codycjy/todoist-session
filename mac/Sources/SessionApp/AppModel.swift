@@ -152,7 +152,7 @@ final class AppModel: ObservableObject {
 
     /// 放弃 = 丢弃：不写入本地 session，不计入统计，已采集的 span 一并删除。
     func abandon() {
-        tracker?.discard(); stopSampling()
+        tracker?.discard(); stopSampling(); Browser.restoreAll()
         engine.abandon(); objectWillChange.send()
     }
 
@@ -237,7 +237,7 @@ final class AppModel: ObservableObject {
     }
 
     private func complete(_ done: CompletedFocus) {
-        tracker?.stop(at: done.endedAt); stopSampling()
+        tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
         try? store?.save(SessionRecord(done))
         pendingCompletion = done
         reloadToday()

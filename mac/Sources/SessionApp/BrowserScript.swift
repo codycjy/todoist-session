@@ -27,6 +27,46 @@ enum Browser {
         return out.flatMap { URL(string: $0) }
     }
 
+    /// 把所有仍停在拦截页的标签页还原为原始 URL。只处理已在运行的浏览器（避免 AppleScript 把它拉起来）。
+    /// 在 session 结束 / 放弃 / App 退出 / App 启动时调用。返回还原的标签页数。
+    @discardableResult
+    static func restoreAll() -> Int {
+        var restored = 0
+        for (bundleId, spec) in specs where !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
+            let list = """
+            tell application "\(spec.appName)"
+              set out to ""
+              set wi to 0
+              repeat with w in windows
+                set wi to wi + 1
+                set ti to 0
+                repeat with t in tabs of w
+                  set ti to ti + 1
+                  set u to URL of t
+                  if u starts with "file:" then set out to out & wi & "\t" & ti & "\t" & u & linefeed
+                end repeat
+              end repeat
+              return out
+            end tell
+            """
+            var error: NSDictionary?
+            guard let out = NSAppleScript(source: list)?.executeAndReturnError(&error).stringValue, error == nil else {
+                if let error { Log.info("扫描 \(spec.appName) 标签页失败：\(error[NSAppleScript.errorNumber] ?? "?") \(error[NSAppleScript.errorMessage] ?? "")") }
+                continue
+            }
+            for line in out.split(separator: "\n") {
+                let f = line.split(separator: "\t", maxSplits: 2).map(String.init)
+                guard f.count == 3, let w = Int(f[0]), let t = Int(f[1]), let original = BlockPage.originalURL(from: f[2]) else { continue }
+                let set = "tell application \"\(spec.appName)\" to set URL of tab \(t) of window \(w) to \"\(original.absoluteString)\""
+                var e: NSDictionary?
+                _ = NSAppleScript(source: set)?.executeAndReturnError(&e)
+                if let e { Log.info("还原 \(spec.appName) 标签页失败：\(e[NSAppleScript.errorMessage] ?? "?")") } else { restored += 1 }
+            }
+        }
+        if restored > 0 { Log.info("已还原 \(restored) 个被拦截的标签页") }
+        return restored
+    }
+
     @discardableResult
     static func redirect(bundleId: String, to url: URL) -> Bool {
         guard let spec = specs[bundleId] else { Log.info("重定向失败：\(bundleId) 不在受支持浏览器列表"); return false }
