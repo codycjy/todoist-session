@@ -22,7 +22,9 @@ final class AppModel: ObservableObject {
     @Published var evaluations: [String: Evaluation] = [:]
 
     let engine: TimerEngine
-    private let api: APIClient?
+    private(set) var api: APIClient?
+    let settings: SettingsStore
+    let permissions = PermissionsModel()
     /// deinit 非隔离，需要访问 Timer；Timer 只在主 actor 上创建，deinit 时已无其他引用。
     private nonisolated(unsafe) var ticker: Timer?
     private nonisolated(unsafe) var syncTimer: Timer?
@@ -30,32 +32,26 @@ final class AppModel: ObservableObject {
     private nonisolated(unsafe) var activationObserver: NSObjectProtocol?
 
     private let store: LocalStore?
-    private let tracker: ActivityTracker?
-    private let sync: SyncService?
+    private var tracker: ActivityTracker?
+    private var sync: SyncService?
     private var askedAccessibility = false
     private var evaluationPoll: Task<Void, Never>?
 
-    /// 默认 25 分钟；开发时可用环境变量 SESSION_FOCUS_SECONDS=10 快速走完整流程。
-    private let focusSeconds = Int(ProcessInfo.processInfo.environment["SESSION_FOCUS_SECONDS"] ?? "") ?? 25 * 60
+    /// 专注时长：开始时读取当前生效设置（环境变量 > 设置页 > 默认 25 分钟），进行中的 session 不受影响。
+    private var focusSeconds: Int { settings.effective.focusSeconds }
 
     init() {
         engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore())
         let env = ProcessInfo.processInfo.environment
-        api = env["SESSION_API_TOKEN"].flatMap { token in
-            URL(string: env["SESSION_API_URL"] ?? "http://localhost:8787")
-                .map { APIClient(baseURL: $0, token: token) }
-        }
-        if api == nil { errorMessage = "未配置 SESSION_API_TOKEN，无法加载 Todoist 任务（仍可使用自定义条目）" }
+        settings = SettingsStore(defaults: .standard, env: env)
+        api = Self.makeAPI(env: env)
+        settings.remote = api
+        if api == nil { errorMessage = Self.noTokenMessage }
 
         let dbPath = env["SESSION_DB_PATH"] ?? Self.defaultDBPath()
         store = try? LocalStore(path: dbPath)
         if store == nil { errorMessage = "无法打开本地数据库，专注记录不会保存" }
-        let blocklist = Self.loadBlocklist(env: env)
-        Log.info("黑名单 apps=\(blocklist.apps.sorted()) domains=\(blocklist.domains.sorted())，辅助功能=\(Permissions.accessibilityGranted)")
-        tracker = store.map {
-            ActivityTracker(sampler: MacActivitySampler(), enforcer: MacBlockEnforcer(), store: $0,
-                            clock: SystemClock(), blocklist: blocklist)
-        }
+        tracker = Self.makeTracker(store: store, settings: settings.effective)
         if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
 
         // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
@@ -96,8 +92,42 @@ final class AppModel: ObservableObject {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.tracker?.sample() } }
 
-        Task { await flushSync() }
+        Task {
+            await settings.pull()   // 后端可达时以后端设置为准；只影响之后开始的 session
+            await flushSync()
+        }
         Task { await refresh() }
+    }
+
+    private static let noTokenMessage = "未配置 API Token（设置页或 SESSION_API_TOKEN），无法加载 Todoist 任务（仍可使用自定义条目）"
+
+    private static func makeAPI(env: [String: String] = ProcessInfo.processInfo.environment) -> APIClient? {
+        guard let token = ConnectionConfig.token(env: env),
+              let url = URL(string: ConnectionConfig.baseURLString(env: env)) else { return nil }
+        return APIClient(baseURL: url, token: token)
+    }
+
+    /// 设置页保存后端地址 / Token 后调用：重建 APIClient 与 SyncService，并重新拉取数据。
+    func reconfigureAPI() {
+        api = Self.makeAPI()
+        settings.remote = api
+        if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
+        errorMessage = api == nil ? Self.noTokenMessage : nil
+        Task {
+            await settings.pull()
+            await flushSync()
+            await refresh()
+        }
+    }
+
+    /// 黑名单与闲置阈值在 tracker 创建时固定，因此每个新 session 重建 tracker。
+    private static func makeTracker(store: LocalStore?, settings s: AppSettings) -> ActivityTracker? {
+        let blocklist = BlockList(apps: Set(s.blockApps), domains: Set(s.blockDomains))
+        Log.info("黑名单 apps=\(blocklist.apps.sorted()) domains=\(blocklist.domains.sorted())，闲置阈值=\(s.idleThresholdSeconds)s，辅助功能=\(Permissions.accessibilityGranted)")
+        return store.map {
+            ActivityTracker(sampler: MacActivitySampler(), enforcer: MacBlockEnforcer(), store: $0, clock: SystemClock(),
+                            blocklist: blocklist, idleThreshold: TimeInterval(s.idleThresholdSeconds))
+        }
     }
 
     deinit {
@@ -258,7 +288,11 @@ final class AppModel: ObservableObject {
         defer { objectWillChange.send() }
         do {
             try engine.start(spec); pendingCompletion = nil
-            if case .focusing(let run) = engine.phase { tracker?.start(run: run); startSampling() }
+            if case .focusing(let run) = engine.phase {
+                // 此时没有运行中的 tracker（engine.start 已确认空闲），按最新设置重建。
+                tracker = Self.makeTracker(store: store, settings: settings.effective)
+                tracker?.start(run: run); startSampling()
+            }
             return true
         }
         catch { errorMessage = "已有进行中的专注或休息"; return false }
@@ -317,13 +351,6 @@ final class AppModel: ObservableObject {
         let dir = base.appendingPathComponent("Session", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("session.db").path
-    }
-
-    private static func loadBlocklist(env: [String: String]) -> BlockList {
-        let fromEnv = BlockList(appsCSV: env["SESSION_BLOCK_APPS"] ?? "", domainsCSV: env["SESSION_BLOCK_DOMAINS"] ?? "")
-        let saved = UserDefaults.standard.data(forKey: "blocklist")
-            .flatMap { try? JSONDecoder().decode(BlockList.self, from: $0) } ?? BlockList()
-        return saved.merged(with: fromEnv)
     }
 
     private func tick() {
