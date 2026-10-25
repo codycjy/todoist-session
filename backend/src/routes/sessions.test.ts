@@ -102,3 +102,29 @@ it('retry returns 404 for missing or other users evaluations and leaves them unt
   expect(db.select().from(evaluations).get()).toMatchObject({ status: 'failed', attempts: 3 })
   expect((await app.request('/evaluations/theirs/retry', { method: 'POST' })).status).toBe(401)
 })
+
+it('retry on an already pending evaluation returns 202 without resetting attempts', async () => {
+  const { app, db } = makeTestApp({ now: () => 777 })
+  addSession(db, 's1', 1000)
+  addEval(db, 's1', { status: 'pending', attempts: 2, lastError: 'BAD_OUTPUT', updatedAt: new Date(5) })
+  const res = await retry(app, 's1')
+  expect(res.status).toBe(202)
+  expect(await res.json()).toEqual({ status: 'pending' })
+  const row = db.select().from(evaluations).get()!
+  expect(row).toMatchObject({ status: 'pending', attempts: 2, lastError: 'BAD_OUTPUT' })
+  expect(row.updatedAt.getTime()).toBe(5)
+})
+
+it('retry of a done evaluation is limited to once per 60s', async () => {
+  let t = 100_000
+  const { app, db } = makeTestApp({ now: () => t })
+  addSession(db, 's1', 1000)
+  addEval(db, 's1', { status: 'done', attempts: 1, focusScore: 80, updatedAt: new Date(100_000 - 59_999) })
+  const limited = await retry(app, 's1')
+  expect(limited.status).toBe(429)
+  expect(await limited.json()).toEqual({ error: 'TOO_MANY' })
+  expect(db.select().from(evaluations).get()).toMatchObject({ status: 'done', attempts: 1 })
+  t = 100_001
+  expect((await retry(app, 's1')).status).toBe(202)
+  expect(db.select().from(evaluations).get()).toMatchObject({ status: 'pending', attempts: 0 })
+})

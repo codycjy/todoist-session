@@ -35,11 +35,19 @@ export function sessionRoutes(db: Db) {
   return r
 }
 
+const RETRY_DONE_COOLDOWN_MS = 60_000
+
 export function evaluationRoutes(db: Db, now: () => number) {
   const r = new Hono<AppEnv>()
 
   r.post('/:sessionId/retry', (c) => {
     const where = and(eq(evaluations.sessionId, c.req.param('sessionId')), eq(evaluations.userId, c.get('user').id))
+    const cur = db.select({ status: evaluations.status, updatedAt: evaluations.updatedAt }).from(evaluations).where(where).get()
+    if (!cur) return c.json({ error: 'NOT_FOUND' }, 404)
+    // 已在排队：幂等，不重置 attempts
+    if (cur.status === 'pending') return c.json({ status: 'pending' }, 202)
+    // 已完成的评估 60 秒内只能重试一次
+    if (cur.status === 'done' && now() - cur.updatedAt.getTime() < RETRY_DONE_COOLDOWN_MS) return c.json({ error: 'TOO_MANY' }, 429)
     const updated = db.update(evaluations)
       .set({ status: 'pending', attempts: 0, lastError: null, updatedAt: new Date(now()) })
       .where(where).returning({ id: evaluations.sessionId }).all()
