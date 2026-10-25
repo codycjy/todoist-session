@@ -3,6 +3,8 @@ import { auth, type AppEnv } from './auth.js'
 import type { Db } from './db/client.js'
 import { categoryRoutes } from './routes/categories.js'
 import { entryRoutes } from './routes/entries.js'
+import { evaluationRoutes, sessionRoutes } from './routes/sessions.js'
+import { statsRoutes } from './routes/stats.js'
 import { syncRoutes } from './routes/sync.js'
 import { todoistRoutes } from './routes/todoist.js'
 import type { TodoistGateway } from './todoist/gateway.js'
@@ -36,6 +38,9 @@ export function createApp(deps: AppDeps) {
     model: deps.evalModel ?? 'claude-haiku-5-5',
     promptVersion: deps.evalPromptVersion ?? 'v1',
   }))
+  api.route('/sessions', sessionRoutes(deps.db))
+  api.route('/evaluations', evaluationRoutes(deps.db, now))
+  api.route('/stats', statsRoutes(deps.db))
   app.route('/', api)
   return app
 }
