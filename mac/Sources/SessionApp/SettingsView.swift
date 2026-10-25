@@ -14,9 +14,9 @@ private struct SettingsForm: View {
     @ObservedObject var store: SettingsStore
     @State private var newApp = ""
     @State private var newDomain = ""
-    @State private var urlText = ConnectionConfig.baseURLString()
+    @State private var urlText = ""
     @State private var tokenText = ""
-    @State private var hasStoredToken = KeychainStore.read() != nil
+    @State private var hasStoredToken = false
     @State private var keychainFailed = false
 
     var body: some View {
@@ -90,7 +90,13 @@ private struct SettingsForm: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear(perform: loadConnection)   // 只在出现时读一次；不要放进 State 初始值（每秒 tick 都会重建 View）
         .task { await model.permissions.refresh() }
+    }
+
+    private func loadConnection() {
+        urlText = ConnectionConfig.baseURLString()
+        hasStoredToken = KeychainStore.read() != nil
     }
 
     // MARK: 绑定与动作
