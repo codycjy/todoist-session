@@ -19,9 +19,21 @@ public struct Category: Codable, Equatable, Identifiable, Sendable {
     public let name: String
     public let color: String
     public let todoistProjectId: String?
+    /// 后端未带 `?all=1` 时没有该字段，缺省为 false。
+    public let archived: Bool
 
-    public init(id: String, name: String, color: String, todoistProjectId: String?) {
+    public init(id: String, name: String, color: String, todoistProjectId: String?, archived: Bool = false) {
         self.id = id; self.name = name; self.color = color; self.todoistProjectId = todoistProjectId
+        self.archived = archived
+    }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        color = try c.decode(String.self, forKey: .color)
+        todoistProjectId = try c.decodeIfPresent(String.self, forKey: .todoistProjectId)
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
     }
 }
 

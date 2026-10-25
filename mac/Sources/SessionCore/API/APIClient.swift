@@ -32,6 +32,12 @@ public final class APIClient: @unchecked Sendable {
         return (try await send("GET", "/categories") as R).categories
     }
 
+    /// 含已归档分类（历史 session 的名称/颜色查找用）。
+    public func allCategories() async throws -> [Category] {
+        struct R: Decodable { let categories: [Category] }
+        return (try await send("GET", "/categories", query: [URLQueryItem(name: "all", value: "1")]) as R).categories
+    }
+
     public func entries() async throws -> [Entry] {
         struct R: Decodable { let entries: [Entry] }
         return (try await send("GET", "/entries") as R).entries

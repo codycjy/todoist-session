@@ -53,6 +53,27 @@ final class APIClientTests: XCTestCase {
         return APIClient(baseURL: URL(string: "http://localhost:8787")!, token: "tok", session: URLSession(configuration: config))
     }
 
+    func testCategoryWithoutArchivedFieldDecodesAsNotArchived() async throws {
+        StubURLProtocol.handler = { _ in
+            (200, Data(#"{"categories":[{"id":"c1","name":"Work","color":"blue","todoistProjectId":"p1"}]}"#.utf8))
+        }
+        let cats = try await makeClient().categories()
+        XCTAssertEqual(cats.first?.archived, false)
+    }
+
+    func testAllCategoriesSendsAllQueryAndDecodesArchived() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in
+            captured = req
+            return (200, Data(#"{"categories":[{"id":"c1","name":"Old","color":"red","todoistProjectId":null,"archived":true}]}"#.utf8))
+        }
+        let cats = try await makeClient().allCategories()
+        XCTAssertEqual(captured?.url?.path, "/categories")
+        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "all", value: "1")])
+        XCTAssertEqual(cats.first?.archived, true)
+    }
+
     func testTasksDecodesAndSendsBearerToken() async throws {
         var captured: URLRequest?
         StubURLProtocol.handler = { req in

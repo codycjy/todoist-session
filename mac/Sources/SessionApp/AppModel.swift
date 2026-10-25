@@ -8,7 +8,10 @@ typealias Category = SessionCore.Category
 @MainActor
 final class AppModel: ObservableObject {
     @Published var tasks: [TodoistTask] = []
+    /// 未归档分类：选择器与 startTask 的项目映射用。
     @Published var categories: [Category] = []
+    /// 含已归档分类：历史 session 的名称/颜色查找用。
+    @Published var allCategories: [Category] = []
     @Published var entries: [Entry] = []
     @Published var pendingCompletion: CompletedFocus?
     @Published var todaySessions: [SessionRecord] = []
@@ -118,7 +121,7 @@ final class AppModel: ObservableObject {
 
     func category(for id: String?) -> Category? {
         guard let id else { return nil }
-        return categories.first { $0.id == id }
+        return allCategories.first { $0.id == id } ?? categories.first { $0.id == id }
     }
 
     // MARK: 动作（只有显式点击/提交才会开始专注）
@@ -178,6 +181,8 @@ final class AppModel: ObservableObject {
             failures.append(error)
             do { categories = try await api.categories() } catch { failures.append(error) }
         }
+        // 失败只影响历史分类查找，不计入错误提示。
+        if let all = try? await api.allCategories() { allCategories = all }
         do { tasks = try await api.tasks(filter: .today) } catch {
             failures.append(error)
             // 瞬时失败保留旧列表；仅在认证失效/未配置时清空。
