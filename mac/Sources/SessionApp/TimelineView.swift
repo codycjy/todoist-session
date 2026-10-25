@@ -7,6 +7,7 @@ struct FocusTimelineView: View {
     @EnvironmentObject var model: AppModel
     let sessions: [SessionRecord]
     let tasks: [TodoistTask]
+    var onSelectTask: (TodoistTask) -> Void = { _ in }
     @State private var selected: String?
 
     private let pointsPerMinute = 1.4
@@ -23,7 +24,13 @@ struct FocusTimelineView: View {
     }
 
     var body: some View {
-        let now = Date()
+        // 每 30 秒重绘一次，否则 `now` 与整点范围会停在首次渲染时（过了整点就缺分界线）。
+        SwiftUI.TimelineView(.periodic(from: .now, by: 30)) { context in
+            content(now: context.date)
+        }
+    }
+
+    @ViewBuilder private func content(now: Date) -> some View {
         let scheduled = scheduled
         let range = TimelineLayout.range(sessions: sessions, scheduled: scheduled.map(\.interval), now: now)
         let blocks = TimelineLayout.blocks(sessions: sessions, rangeStart: range.start, pointsPerMinute: pointsPerMinute)
@@ -47,7 +54,8 @@ struct FocusTimelineView: View {
                         ForEach(scheduled, id: \.task.id) { item in
                             let box = TimelineLayout.block(for: item.interval, rangeStart: range.start,
                                                            pointsPerMinute: pointsPerMinute)
-                            scheduledView(item.task, height: box.height)
+                            Button { onSelectTask(item.task) } label: { scheduledView(item.task, height: box.height) }
+                                .buttonStyle(.plain)
                                 .frame(width: columnWidth)
                                 .offset(x: gutter + 4, y: box.top)
                         }

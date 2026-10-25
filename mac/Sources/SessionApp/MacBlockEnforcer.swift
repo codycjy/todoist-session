@@ -10,10 +10,13 @@ final class MacBlockEnforcer: BlockEnforcer {
         case .allow:
             return
         case .hideApp(let bundleId):
-            NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).forEach { _ = $0.hide() }
-        case .redirectSite:
-            guard let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-                  let page = BlockPage.url() else { return }
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            let hidden = apps.map { $0.hide() }
+            Log.info("拦截 App \(bundleId)：进程 \(apps.count) 个，hide 结果 \(hidden)")
+        case .redirectSite(let host):
+            let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            Log.info("拦截网站 \(host)：前台 \(bundleId ?? "nil")")
+            guard let bundleId, let page = BlockPage.url() else { Log.info("重定向跳过：无前台 App 或无法生成拦截页"); return }
             Browser.redirect(bundleId: bundleId, to: page)
         }
         showOverlay("正在专注：\(focusTitle)　剩余 \(AppModel.format(remainingSeconds))")

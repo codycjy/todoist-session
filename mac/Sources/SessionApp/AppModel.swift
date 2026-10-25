@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
         store = try? LocalStore(path: dbPath)
         if store == nil { errorMessage = "无法打开本地数据库，专注记录不会保存" }
         let blocklist = Self.loadBlocklist(env: env)
+        Log.info("黑名单 apps=\(blocklist.apps.sorted()) domains=\(blocklist.domains.sorted())，辅助功能=\(Permissions.accessibilityGranted)")
         tracker = store.map {
             ActivityTracker(sampler: MacActivitySampler(), enforcer: MacBlockEnforcer(), store: $0,
                             clock: SystemClock(), blocklist: blocklist)

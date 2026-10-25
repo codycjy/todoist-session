@@ -48,6 +48,7 @@ final class MacActivitySampler: ActivitySampler {
         }
         let bundleId = app.bundleIdentifier
         let host = bundleId.flatMap { Browser.currentURL(bundleId: $0) }?.host?.lowercased()
+        Log.debug("采样 前台=\(bundleId ?? "nil") host=\(host ?? "nil") AX=\(AXIsProcessTrusted())")
         return FrontmostInfo(bundleId: bundleId, appName: app.localizedName,
                              windowTitle: Self.windowTitle(pid: app.processIdentifier), urlHost: host)
     }

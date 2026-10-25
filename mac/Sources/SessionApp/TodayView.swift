@@ -5,6 +5,7 @@ struct TodayView: View {
     @EnvironmentObject var model: AppModel
     @State private var title = ""
     @State private var categoryId: String?
+    @State private var pickedTask: TodoistTask?
 
     private var idle: Bool { model.engine.phase == .idle }
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -76,10 +77,34 @@ struct TodayView: View {
             }
             Text("今日：\(model.todaySessions.count) 个番茄 · \(model.todaySessions.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
                 .foregroundStyle(.secondary)
-            FocusTimelineView(sessions: model.todaySessions, tasks: model.tasks)
+            FocusTimelineView(sessions: model.todaySessions, tasks: model.tasks) { pickedTask = $0 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let task = pickedTask { taskSheet(task) }
         }
         .padding()
+    }
+
+    /// 点击时间轴上的计划块后，在右侧底部弹出的开始面板。
+    private func taskSheet(_ task: TodoistTask) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.content).font(.headline).lineLimit(2)
+                HStack(spacing: 6) {
+                    if let t = task.dueTime { Text(t, format: .dateTime.hour().minute()) }
+                    if let name = model.categories.first(where: { $0.todoistProjectId == task.projectId })?.name { Text(name) }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("开始专注") { model.startTask(task); pickedTask = nil }
+                .buttonStyle(.borderedProminent).disabled(!idle)
+            Button { pickedTask = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).accessibilityLabel("关闭")
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func row(_ text: String, subtitle: String?, action: @escaping () -> Void) -> some View {
