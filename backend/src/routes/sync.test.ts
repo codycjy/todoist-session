@@ -76,3 +76,10 @@ it('returns 400 for a malformed body and 401 without a token', async () => {
   const res = await app.request('/sync/sessions', { method: 'POST', body: '{}' })
   expect(res.status).toBe(401)
 })
+
+it('keeps the category on a session even if that category is archived', async () => {
+  const { app, db } = makeTestApp()
+  db.insert(categories).values({ id: 'c-old', userId: 'u1', name: 'Old', color: 'red', archived: true }).run()
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { categoryId: 'c-old' })] }))
+  expect(db.select().from(sessions).get()?.categoryId).toBe('c-old')
+})

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { randomUUID } from 'node:crypto'
 import type { AppEnv } from '../auth.js'
@@ -55,33 +55,53 @@ export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps
     if (gateway === UNREADABLE) return c.json({ error: 'TODOIST_TOKEN_UNREADABLE' }, 409)
     if (!gateway) return c.json({ error: 'TODOIST_NOT_CONFIGURED' }, 409)
     try {
-      for (const p of await gateway.projects()) {
-        db.insert(categories)
-          .values({ id: randomUUID(), userId: user.id, todoistProjectId: p.id, name: p.name, color: p.color })
-          .onConflictDoUpdate({
-            target: [categories.userId, categories.todoistProjectId],
-            set: { name: p.name, color: p.color },
-          })
-          .run()
-      }
+      const projects = await gateway.projects()
+      db.transaction((tx) => {
+        for (const p of projects) {
+          tx.insert(categories)
+            .values({ id: randomUUID(), userId: user.id, todoistProjectId: p.id, name: p.name, color: p.color })
+            .onConflictDoUpdate({
+              target: [categories.userId, categories.todoistProjectId],
+              set: { name: p.name, color: p.color, archived: false },
+            })
+            .run()
+        }
+        if (projects.length > 0) {
+          const live = new Set(projects.map((p) => p.id))
+          const known = tx
+            .select()
+            .from(categories)
+            .where(and(eq(categories.userId, user.id), isNotNull(categories.todoistProjectId)))
+            .all()
+          for (const row of known) {
+            if (row.todoistProjectId && !live.has(row.todoistProjectId) && !row.archived) {
+              tx.update(categories).set({ archived: true }).where(eq(categories.id, row.id)).run()
+            }
+          }
+        }
+      })
     } catch (e) {
       if (e instanceof TodoistAuthError) return c.json({ error: 'TODOIST_AUTH' }, 401)
       throw e
     }
-    const rows = db
-      .select()
-      .from(categories)
-      .where(and(eq(categories.userId, user.id), eq(categories.archived, false)))
-      .all()
-    return c.json({ categories: rows.map(toCategoryDto) })
+    const all = c.req.query('all') === '1'
+    return c.json({ categories: listCategories(db, user.id, all).map((row) => toCategoryDto(row, all)) })
   })
 
   return r
 }
 
-export const toCategoryDto = (c: typeof categories.$inferSelect) => ({
+export function listCategories(db: Db, userId: string, includeArchived: boolean) {
+  const where = includeArchived
+    ? eq(categories.userId, userId)
+    : and(eq(categories.userId, userId), eq(categories.archived, false))
+  return db.select().from(categories).where(where).all()
+}
+
+export const toCategoryDto = (c: typeof categories.$inferSelect, withArchived = false) => ({
   id: c.id,
   name: c.name,
   color: c.color,
   todoistProjectId: c.todoistProjectId,
+  ...(withArchived ? { archived: c.archived } : {}),
 })

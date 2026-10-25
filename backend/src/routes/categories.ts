@@ -1,11 +1,10 @@
-import { and, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
 import type { Db } from '../db/client.js'
 import { categories } from '../db/schema.js'
-import { toCategoryDto } from './todoist.js'
+import { listCategories, toCategoryDto } from './todoist.js'
 
 const body = z.object({ name: z.string().trim().min(1), color: z.string().min(1) })
 
@@ -13,12 +12,8 @@ export function categoryRoutes(db: Db) {
   const r = new Hono<AppEnv>()
 
   r.get('/', (c) => {
-    const rows = db
-      .select()
-      .from(categories)
-      .where(and(eq(categories.userId, c.get('user').id), eq(categories.archived, false)))
-      .all()
-    return c.json({ categories: rows.map(toCategoryDto) })
+    const all = c.req.query('all') === '1'
+    return c.json({ categories: listCategories(db, c.get('user').id, all).map((row) => toCategoryDto(row, all)) })
   })
 
   r.post('/', async (c) => {

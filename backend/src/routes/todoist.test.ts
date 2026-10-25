@@ -103,3 +103,44 @@ it('maps unexpected errors to a JSON 500 INTERNAL', async () => {
   expect(await res.json()).toEqual({ error: 'INTERNAL' })
   spy.mockRestore()
 })
+
+it('archives categories whose Todoist project disappeared, but keeps them for history', async () => {
+  let projects = [
+    { id: 'p1', name: 'Work', color: 'blue' },
+    { id: 'p2', name: 'Home', color: 'red' },
+  ]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  const first = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(first.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Home', 'Work'])
+
+  projects = [projects[0]!]
+  const second = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(second.categories.map((c: { name: string }) => c.name)).toEqual(['Work'])
+
+  const all = await (await app.request('/categories?all=1', { headers: authHeader })).json()
+  expect(all.categories.find((c: { name: string }) => c.name === 'Home')).toMatchObject({ archived: true })
+})
+
+it('un-archives a project that comes back', async () => {
+  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = [{ id: 'p9', name: 'Other', color: 'red' }]
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = [{ id: 'p1', name: 'Work', color: 'blue' }, { id: 'p9', name: 'Other', color: 'red' }]
+  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(res.categories).toHaveLength(2)
+})
+
+it('never archives custom categories and ignores an empty project list', async () => {
+  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  await app.request('/categories', {
+    method: 'POST', headers: { ...authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: '阅读', color: 'green' }),
+  })
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = []
+  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(res.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Work', '阅读'])
+})
