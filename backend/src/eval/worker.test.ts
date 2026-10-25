@@ -124,4 +124,23 @@ describe('eval worker', () => {
     db.update(evaluations).set({ status: 'pending', attempts: 0, lastError: null }).run()
     expect(await w.runOnce()).toBe(1)
   })
+  describe('superseded in-flight evaluations', () => {
+    const reset = (db: ReturnType<typeof setup>) =>
+      db.update(evaluations).set({ status: 'pending', attempts: 0, lastError: null, focusScore: null, summary: null, updatedAt: new Date(5000) }).run()
+
+    it('a stale failure does not touch a row that was retried mid-flight', async () => {
+      const db = setup()
+      const w = createEvalWorker({ db, now: () => 9000, evaluator: { evaluate: async () => { reset(db); throw new EvalError('BAD_OUTPUT') } } })
+      await w.runOnce()
+      expect(row(db, 's1')).toMatchObject({ status: 'pending', attempts: 0, lastError: null })
+      expect(row(db, 's1').updatedAt.getTime()).toBe(5000)
+    })
+
+    it('a stale success does not overwrite a row that was retried mid-flight', async () => {
+      const db = setup()
+      const w = createEvalWorker({ db, now: () => 9000, evaluator: { evaluate: async (i) => { reset(db); return good.evaluate(i) } } })
+      await w.runOnce()
+      expect(row(db, 's1')).toMatchObject({ status: 'pending', attempts: 0, focusScore: null, summary: null })
+    })
+  })
 })

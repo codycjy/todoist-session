@@ -49,7 +49,11 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
     if (!row || row.status !== 'pending' || row.attempts >= MAX_ATTEMPTS) return false
     const input = loadInput(sessionId)
     const attempt = row.attempts + 1
-    const stillPending = and(eq(evaluations.sessionId, sessionId), eq(evaluations.status, 'pending'))
+    // 乐观并发：领取后若被重试（attempts/updated_at 变化）则本次结果作废
+    const unchanged = and(
+      eq(evaluations.sessionId, sessionId), eq(evaluations.status, 'pending'),
+      eq(evaluations.attempts, row.attempts), eq(evaluations.updatedAt, row.updatedAt),
+    )
 
     let error: string | null = null
     let result
@@ -62,18 +66,19 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
       }
     }
 
+    let changes: number
     if (result) {
-      db.update(evaluations).set({
+      changes = db.update(evaluations).set({
         status: 'done', attempts: attempt, focusScore: result.focusScore, summary: result.summary,
         distractions: result.distractions, lastError: null, updatedAt: new Date(now()),
-      }).where(stillPending).run()
+      }).where(unchanged).run().changes
     } else {
-      db.update(evaluations).set({
+      changes = db.update(evaluations).set({
         status: attempt >= MAX_ATTEMPTS ? 'failed' : 'pending', attempts: attempt,
         lastError: error, updatedAt: new Date(now()),
-      }).where(stillPending).run()
+      }).where(unchanged).run().changes
     }
-    return true
+    return changes > 0
   }
 
   return {
