@@ -16,8 +16,12 @@ final class MacBlockEnforcer: BlockEnforcer {
         case .redirectSite(let host):
             let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             Log.info("拦截网站 \(host)：前台 \(bundleId ?? "nil")")
-            let original = bundleId.flatMap { Browser.currentURL(bundleId: $0) }
-            guard let bundleId, let page = BlockPage.url(original: original) else { Log.info("重定向跳过：无前台 App 或无法生成拦截页"); return }
+            guard let bundleId else { Log.info("重定向跳过：无前台 App"); break }
+            guard let original = Browser.currentURL(bundleId: bundleId) else {
+                // 读不到原始 URL 就不能保证之后还原，宁可不重定向（遮罩仍会显示）。
+                Log.info("无法读取原始 URL，跳过重定向"); break
+            }
+            guard let page = BlockPage.url(original: original) else { Log.info("重定向跳过：无法生成拦截页"); break }
             Browser.redirect(bundleId: bundleId, to: page)
         }
         showOverlay("正在专注：\(focusTitle)　剩余 \(AppModel.format(remainingSeconds))")

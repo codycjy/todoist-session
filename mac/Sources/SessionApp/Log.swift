@@ -12,8 +12,12 @@ enum Log {
 
     static func info(_ message: String) {
         FileHandle.standardError.write(Data("[\(stamp.string(from: Date()))] \(message)\n".utf8))
-        logger.info("\(message, privacy: .public)")
+        // 消息可能含主机名/标题等，统一按 private 处理；调用方也只应传 host，不传完整 URL。
+        logger.info("\(message, privacy: .private)")
     }
+
+    /// 日志里表示 URL 的唯一方式：只含 host。
+    static func host(_ url: URL?) -> String { url?.host ?? "?" }
 
     static func debug(_ message: @autoclosure () -> String) {
         if verbose { info(message()) }

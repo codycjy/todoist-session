@@ -6,8 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        // 上次异常退出时可能留下被重定向的标签页（此时不会有进行中的 session）。
-        Browser.restoreAll()
+        // 启动时的残留标签页还原由 AppModel.init 负责（它知道是否恢复了进行中的 session）。
     }
 
     func applicationWillTerminate(_ notification: Notification) {
