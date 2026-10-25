@@ -55,7 +55,7 @@ public final class LocalStore: @unchecked Sendable {
         try db.write { db in
             for s in spans {
                 try db.execute(sql: """
-                    INSERT OR IGNORE INTO spans(id, session_id, kind, app_bundle_id, app_name, window_title,
+                    INSERT OR REPLACE INTO spans(id, session_id, kind, app_bundle_id, app_name, window_title,
                       url_host, url_path, started_at, ended_at, was_blocked)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
                     """, arguments: [s.id, s.sessionId, s.kind.rawValue, s.appBundleId, s.appName, s.windowTitle,

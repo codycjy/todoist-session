@@ -47,7 +47,23 @@ public final class ActivityTracker {
         title = run.title
         endAt = run.endAt
         builder = SpanBuilder(sessionId: sessionId!, idleThreshold: idleThreshold)
+        // 进程重启后接着同一次专注：应用没在运行的这段时间没有采集，补一个闲置 span 占位。
+        fillGap(sessionId: sessionId!, until: clock.now)
         sample()
+    }
+
+    /// 重启时发现专注早已到点：把停机期间补成闲置，之后由调用方保存 session。
+    public func closeRecovered(run: FocusRun, at end: Date) {
+        fillGap(sessionId: run.id.uuidString.lowercased(), until: end)
+    }
+
+    private static let gapTolerance: TimeInterval = 10
+
+    private func fillGap(sessionId: String, until end: Date) {
+        guard let last = (try? store.spans(sessionId: sessionId))?.map(\.endedAt).max(),
+              end.timeIntervalSince(last) > Self.gapTolerance else { return }
+        persist([ActivitySpan(sessionId: sessionId, kind: .idle, appBundleId: nil, appName: nil, windowTitle: nil,
+                              urlHost: nil, startedAt: last, endedAt: end, wasBlocked: false)])
     }
 
     /// 正常结束：在 endedAt 处关闭最后一个 span 并落盘。
@@ -82,6 +98,7 @@ public final class ActivityTracker {
                                     windowTitle: f.windowTitle, urlHost: f.urlHost, wasBlocked: decision != .allow)
         }
         persist(b.add(sample))
+        if let open = b.openSpan(at: now) { persist([open]) }   // 检查点：强退后至少保留到最近一次采样
         builder = b
     }
 

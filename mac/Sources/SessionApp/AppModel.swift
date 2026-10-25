@@ -56,7 +56,10 @@ final class AppModel: ObservableObject {
         if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
 
         // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
-        if let recovered = engine.recovered { complete(recovered) }
+        if let recovered = engine.recovered {
+            tracker?.closeRecovered(run: recovered.run, at: recovered.endedAt)
+            complete(recovered)
+        }
         engine.onCompleted = { [weak self] done in
             // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
             Task { @MainActor in self?.complete(done) }

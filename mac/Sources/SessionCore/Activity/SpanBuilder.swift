@@ -10,6 +10,7 @@ public struct SpanBuilder {
         var urlHost: String?
         var wasBlocked: Bool
         var start: Date
+        let id = UUID().uuidString.lowercased()
 
         func sameTarget(as s: ActivitySample) -> Bool {
             kind == .active && appBundleId == s.appBundleId && windowTitle == s.windowTitle
@@ -65,10 +66,19 @@ public struct SpanBuilder {
         return out
     }
 
+    /// 仍打开的 span 截至 `end` 的快照（id 与最终关闭时一致，落盘用 upsert 即可覆盖）。
+    /// 用于崩溃/强退后恢复：已采集的部分不会随进程丢失。
+    public func openSpan(at end: Date) -> ActivitySpan? {
+        guard let cur = current, end > cur.start else { return nil }
+        return ActivitySpan(id: cur.id, sessionId: sessionId, kind: cur.kind, appBundleId: cur.appBundleId,
+                            appName: cur.appName, windowTitle: cur.windowTitle, urlHost: cur.urlHost,
+                            startedAt: cur.start, endedAt: end, wasBlocked: cur.wasBlocked)
+    }
+
     private mutating func close(at end: Date) -> [ActivitySpan] {
         defer { current = nil }
         guard let cur = current, end > cur.start else { return [] }
-        return [ActivitySpan(sessionId: sessionId, kind: cur.kind, appBundleId: cur.appBundleId,
+        return [ActivitySpan(id: cur.id, sessionId: sessionId, kind: cur.kind, appBundleId: cur.appBundleId,
                              appName: cur.appName, windowTitle: cur.windowTitle, urlHost: cur.urlHost,
                              startedAt: cur.start, endedAt: end, wasBlocked: cur.wasBlocked)]
     }

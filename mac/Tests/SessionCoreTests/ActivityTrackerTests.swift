@@ -49,6 +49,48 @@ final class ActivityTrackerTests: XCTestCase {
         XCTAssertEqual(spans[0].endedAt, t0.addingTimeInterval(4))
     }
 
+    func testOpenSpanIsCheckpointedSoCrashKeepsCollectedActivity() throws {
+        let t = makeTracker()
+        let t0 = clock.now
+        t.start(run: run)
+        clock.advance(2); t.sample()
+        clock.advance(2); t.sample()
+        // 不调用 stop：模拟进程被强退
+        let spans = try store.spans(sessionId: sid)
+        XCTAssertEqual(spans.count, 1)
+        XCTAssertEqual(spans[0].startedAt, t0)
+        XCTAssertEqual(spans[0].endedAt, t0.addingTimeInterval(4))
+    }
+
+    func testResumeAfterRestartFillsDowntimeWithIdleSpan() throws {
+        let first = makeTracker()
+        let t0 = clock.now
+        first.start(run: run)
+        clock.advance(4); first.sample()              // 崩溃前最后一次采样
+        clock.advance(300)                            // 应用未运行 5 分钟
+        let second = makeTracker()
+        second.start(run: run)
+        clock.advance(2); second.sample()
+        second.stop(at: clock.now)
+        let spans = try store.spans(sessionId: sid).sorted { $0.startedAt < $1.startedAt }
+        let gap = try XCTUnwrap(spans.first { $0.kind == .idle })
+        XCTAssertEqual(gap.startedAt, t0.addingTimeInterval(4))
+        XCTAssertEqual(gap.endedAt, t0.addingTimeInterval(304))
+        XCTAssertEqual(spans.count, 3)
+    }
+
+    func testCloseRecoveredFillsUntilPlannedEnd() throws {
+        let first = makeTracker()
+        let t0 = clock.now
+        first.start(run: run)
+        clock.advance(4); first.sample()
+        let second = makeTracker()
+        second.closeRecovered(run: run, at: run.endAt)
+        let idle = try XCTUnwrap(try store.spans(sessionId: sid).first { $0.kind == .idle })
+        XCTAssertEqual(idle.startedAt, t0.addingTimeInterval(4))
+        XCTAssertEqual(idle.endedAt, run.endAt)
+    }
+
     func testIdleSampleDoesNotReadFrontmost() throws {
         let t = makeTracker()
         t.start(run: run)
