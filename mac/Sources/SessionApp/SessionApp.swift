@@ -5,7 +5,7 @@ import SessionCore
 struct SessionApp: App {
     var body: some Scene {
         Window("Session", id: "main") {
-            Text(SessionCoreInfo.name).padding()
+            Text("Session").padding()
         }
     }
 }
