@@ -1563,7 +1563,9 @@ public final class TimerEngine {
     public func tick() {
         switch phase {
         case .focusing(let run) where clock.now >= run.endAt:
-            onCompleted?(finish(run))
+            // 先求值再回调：`onCompleted?(finish(run))` 在回调为 nil 时会跳过参数求值，导致永远不会完成。
+            let completed = finish(run)
+            onCompleted?(completed)
         case .breaking(_, let until) where clock.now >= until:
             setPhase(.idle)
         default:
