@@ -22,6 +22,7 @@
 | 黑名单来源 | 设置页 | 环境变量 `SESSION_BLOCK_APPS` / `SESSION_BLOCK_DOMAINS`（逗号分隔，bundle id / 域名）+ UserDefaults 键 `blocklist` | 设置页是 M4；M2 先能用 |
 | 睡眠 | 记为 idle span | 采样间隔超过 `maxGap`（10 秒）时，间隙补一个 idle span | 与"以时间戳为准"一致 |
 | 越权/失效引用 | 未规定 | 同步时 `categoryId` / `entryId` 不属于该用户或不存在 → 存 null，不拒绝整条 | 避免一条坏数据让 outbox 永远卡住 |
+| Todoist 项目被删除/归档 | 未规定 | 同步项目时，本地 `todoist_project_id` 不在 Todoist 返回列表里的分类标记为 `archived`；**session 保留**，选择器里不再展示；Todoist 里恢复后自动取消归档 | 用户要求：历史记录不丢，列表不再出现 |
 | 其他用户已占用的 session id | 未规定 | 返回 `rejected: [{id, reason:"CONFLICT"}]`，客户端标记 `rejected` 不再重试 | 幂等且不泄露他人数据 |
 
 **不做（留给后续）：** 设置页/黑名单编辑 UI（M4）、LLM 评估与时间轴上的分数/摘要（M3）、`url_path` 采集（默认只存 host；字段保留为 null）、Firefox 网站拦截、系统通知。
@@ -70,6 +71,20 @@
 约束：`sessions` 1–50 条；每条 `spans` ≤ 5000；`endedAt >= startedAt`（span 同理）。
 
 响应 `200`：`{ "accepted": ["id", ...], "rejected": [{ "id": "...", "reason": "CONFLICT" | "INVALID_TIME" }] }`。已存在且属于本人的 id 算 accepted（幂等）。请求体非法 → `400 {"error":"BAD_REQUEST"}`；无/错 token → `401`。
+
+---
+
+## 0.3 参考 activity-clock 的经验（`/Users/saltfish/Files/Coding/activity-clock`）
+
+该项目是用户之前写的 Rust 采集器，`crates/ac-watchers/src/{afk,window}.rs` 里踩过的坑直接并入本计划：
+
+| 问题 | activity-clock 的结论 | M2 的做法 |
+|---|---|---|
+| 闲置检测 | `CGEventSourceSecondsSinceLastEventType` 在非 .app 的进程里会返回系统开机时长（~67000 秒），改用 IOKit `IOHIDSystem` 的 `HIDIdleTime`（纳秒） | D6 的 `idleSeconds()` 用 `HIDIdleTime`；而我们 `swift run` 正是裸可执行文件，不能用 CGEventSource |
+| 看视频被判闲置 | 闲置超过阈值时，检查前台 App 是否持有 `PreventUserIdleDisplaySleep` 电源断言（`IOPMCopyAssertionsByProcess`），有则不算闲置 | D6 同样实现；这顺带解决了设计文档里"看视频/阅读被误判闲置"的已知局限 |
+| 前台 App 检测 | 没有 NSRunLoop 的进程里 `NSWorkspace.frontmostApplication` 会缓存不更新，改用 `lsappinfo`（约 6ms/次） | 我们的 App 有 RunLoop，仍以 `NSWorkspace` 为主；E1 第 12 项专门验证切换是否及时，若发现陈旧值，改用 `lsappinfo front` + `lsappinfo info -only bundleid -only name -only pid <asn>` |
+| 窗口标题 | `CGWindowList` 需要"屏幕录制"权限，不要用；用 AX 的 `AXFocusedWindow → AXTitle`；失败时记录 AX 错误码（`-25211 APIDisabled`、`-25204 CannotComplete` 等）便于排查 | D6 用 AX；用 `os.Logger` 在 debug 级别输出错误码名 |
+| 浏览器 URL | 另有 Chrome 扩展方案（`extension/`），无需 AppleScript 自动化权限 | M2 沿用设计文档的 AppleScript；扩展方案记为后续备选，不在 M2 做 |
 
 ---
 
@@ -353,6 +368,134 @@ export function syncRoutes(db: Db) {
 ```bash
 git add backend/src/routes/sync.ts backend/src/routes/sync.test.ts backend/src/app.ts
 git commit -m "feat(backend): add idempotent POST /sync/sessions
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task C3：Todoist 项目被删除后归档分类（保留 session，不再列出）
+
+**Files:**
+- Modify: `backend/src/routes/todoist.ts`, `backend/src/routes/categories.ts`
+- Test: `backend/src/routes/todoist.test.ts`、`backend/src/routes/sync.test.ts`
+
+**规则**
+- `GET /todoist/projects` 成功拿到 Todoist 项目列表后：该用户所有 `todoist_project_id` 非空、且**不在**返回列表中的分类 → `archived = true`；在列表中的分类 → `archived = false`（项目恢复后自动重新出现）。
+- 自定义分类（`todoist_project_id` 为 null）永不自动归档。
+- 返回 `categories`：仍然只含未归档的（选择器用）；新增 `?all=1` 时包含已归档的，并且每个分类带 `archived` 字段（历史 session 查名称/颜色用）。`/categories` 同样支持 `?all=1`。
+- 安全阀：Todoist 返回空列表时**不归档**任何分类（用户至少有 Inbox，空列表更可能是异常）；Todoist 调用抛错时不改动 DB（现有逻辑已在抛错前不写入）。
+- session 和 entries 的 `category_id` 不动：历史记录保留，仍能找到分类名与颜色。
+
+**Step 1: 写失败测试**（追加到 `todoist.test.ts`，沿用该文件的 `gatewayWith` 辅助函数与 `authHeader`）
+
+```ts
+it('archives categories whose Todoist project disappeared, but keeps them for history', async () => {
+  let projects = [
+    { id: 'p1', name: 'Work', color: 'blue' },
+    { id: 'p2', name: 'Home', color: 'red' },
+  ]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  const first = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(first.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Home', 'Work'])
+
+  projects = [projects[0]!]
+  const second = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(second.categories.map((c: { name: string }) => c.name)).toEqual(['Work'])
+
+  const all = await (await app.request('/categories?all=1', { headers: authHeader })).json()
+  expect(all.categories.find((c: { name: string }) => c.name === 'Home')).toMatchObject({ archived: true })
+})
+
+it('un-archives a project that comes back', async () => {
+  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = [{ id: 'p9', name: 'Other', color: 'red' }]
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = [{ id: 'p1', name: 'Work', color: 'blue' }, { id: 'p9', name: 'Other', color: 'red' }]
+  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(res.categories).toHaveLength(2)
+})
+
+it('never archives custom categories and ignores an empty project list', async () => {
+  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  await app.request('/categories', {
+    method: 'POST', headers: { ...authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: '阅读', color: 'green' }),
+  })
+  await app.request('/todoist/projects', { headers: authHeader })
+  projects = []
+  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
+  expect(res.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Work', '阅读'])
+})
+```
+
+再追加到 `sync.test.ts`：一个绑定到已归档分类的 session 仍保留 `categoryId`（归档不等于不存在）：
+```ts
+it('keeps the category on a session even if that category is archived', async () => {
+  const { app, db } = makeTestApp()
+  db.insert(categories).values({ id: 'c-old', userId: 'u1', name: 'Old', color: 'red', archived: true }).run()
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { categoryId: 'c-old' })] }))
+  expect(db.select().from(sessions).get()?.categoryId).toBe('c-old')
+})
+```
+
+**Step 2:** `npm test` → 前三个 FAIL。
+
+**Step 3: 实现**
+
+`todoist.ts` 的 `/projects`：把 `for` 循环改为在同一事务内 upsert 并归档，且 `set` 里加 `archived: false`：
+```ts
+    try {
+      const projects = await gateway.projects()
+      db.transaction((tx) => {
+        for (const p of projects) {
+          tx.insert(categories)
+            .values({ id: randomUUID(), userId: user.id, todoistProjectId: p.id, name: p.name, color: p.color })
+            .onConflictDoUpdate({
+              target: [categories.userId, categories.todoistProjectId],
+              set: { name: p.name, color: p.color, archived: false },
+            })
+            .run()
+        }
+        if (projects.length > 0) {
+          const live = new Set(projects.map((p) => p.id))
+          const known = tx.select().from(categories)
+            .where(and(eq(categories.userId, user.id), isNotNull(categories.todoistProjectId))).all()
+          for (const row of known) {
+            if (row.todoistProjectId && !live.has(row.todoistProjectId) && !row.archived) {
+              tx.update(categories).set({ archived: true }).where(eq(categories.id, row.id)).run()
+            }
+          }
+        }
+      })
+    } catch (e) { ...原有 TodoistAuthError 分支不变... }
+```
+（`import { and, eq, isNotNull } from 'drizzle-orm'`。）
+
+返回部分改为共用一个函数，放在 `todoist.ts` 导出，`categories.ts` 复用：
+```ts
+export function listCategories(db: Db, userId: string, includeArchived: boolean) {
+  const where = includeArchived
+    ? eq(categories.userId, userId)
+    : and(eq(categories.userId, userId), eq(categories.archived, false))
+  return db.select().from(categories).where(where).all()
+}
+export const toCategoryDto = (c: typeof categories.$inferSelect, withArchived = false) => ({
+  id: c.id, name: c.name, color: c.color, todoistProjectId: c.todoistProjectId,
+  ...(withArchived ? { archived: c.archived } : {}),
+})
+```
+两个 GET 路由读 `c.req.query('all') === '1'`，调用 `listCategories(...)` 并 `toCategoryDto(row, all)`。注意：`POST /categories` 的返回和 M1 已有测试不要变（不带 `archived`）。
+
+**Step 4:** `npm test && npm run typecheck` → 全绿（含 M1 原有用例）。
+
+**Step 5: 提交**
+```bash
+git add backend/src/routes/todoist.ts backend/src/routes/categories.ts backend/src/routes/todoist.test.ts backend/src/routes/sync.test.ts
+git commit -m "feat(backend): archive categories for deleted Todoist projects, keep history
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
@@ -1376,12 +1519,46 @@ enum BlockPage {
 ```swift
 import AppKit
 import ApplicationServices
+import IOKit
+import IOKit.pwr_mgt
+import os
 import SessionCore
 
 final class MacActivitySampler: ActivitySampler {
+    /// 距上次键鼠输入的秒数。用 IOKit HIDIdleTime，而不是 CGEventSource——后者在非 .app 的进程里
+    /// 会返回系统开机时长（见 activity-clock b887f94）。若前台 App 持有"阻止显示器休眠"断言
+    /// （正在播放视频/演示），超过阈值也不算闲置：此时返回 0。
     func idleSeconds() -> TimeInterval {
-        // ~0 即"任意输入事件"。
-        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        let hid = Self.hidIdleSeconds()
+        guard hid >= Self.assertionCheckFloor else { return hid }
+        if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+           Self.holdsDisplaySleepAssertion(pid: pid) { return 0 }
+        return hid
+    }
+
+    /// 只在已经接近闲置阈值时才去查电源断言，避免每 2 秒都查。
+    private static let assertionCheckFloor: TimeInterval = 60
+
+    private static func hidIdleSeconds() -> TimeInterval {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"), &iterator) == KERN_SUCCESS
+        else { return 0 }
+        defer { IOObjectRelease(iterator) }
+        let entry = IOIteratorNext(iterator)
+        guard entry != 0 else { return 0 }
+        defer { IOObjectRelease(entry) }
+        guard let prop = IORegistryEntryCreateCFProperty(entry, "HIDIdleTime" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? NSNumber else { return 0 }
+        return TimeInterval(prop.int64Value) / 1_000_000_000
+    }
+
+    /// IOPMCopyAssertionsByProcess 返回 { PID(CFNumber) → [断言字典] }；断言字典里 "AssertType" 为
+    /// "PreventUserIdleDisplaySleep" 表示该进程在阻止显示器休眠（视频播放等）。
+    private static func holdsDisplaySleepAssertion(pid: pid_t) -> Bool {
+        var raw: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&raw) == kIOReturnSuccess,
+              let dict = raw?.takeRetainedValue() as? [NSNumber: [[String: Any]]] else { return false }
+        return (dict[NSNumber(value: pid)] ?? []).contains { ($0["AssertType"] as? String) == "PreventUserIdleDisplaySleep" }
     }
 
     func frontmost() -> FrontmostInfo {
@@ -1399,13 +1576,20 @@ final class MacActivitySampler: ActivitySampler {
         guard AXIsProcessTrusted() else { return nil }
         let axApp = AXUIElementCreateApplication(pid)
         var window: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &window) == .success,
-              let window else { return nil }
+        let werr = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &window)
+        guard werr == .success, let window else {
+            // -25211 APIDisabled（未授权）、-25204 CannotComplete 等，排查权限问题时看这里。
+            log.debug("AXFocusedWindow pid=\(pid) failed: \(werr.rawValue)")
+            return nil
+        }
         var title: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success
-        else { return nil }
-        return title as? String
+        let err = AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title)
+        guard err == .success else { log.debug("AXTitle pid=\(pid) failed: \(err.rawValue)"); return nil }
+        let text = title as? String
+        return (text?.isEmpty ?? true) ? nil : text   // 空标题按"没有标题"处理
     }
+
+    private static let log = Logger(subsystem: "session", category: "sampler")
 }
 ```
 
@@ -1709,6 +1893,46 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task D9：Mac 端处理已归档分类
+
+**Files:**
+- Modify: `mac/Sources/SessionCore/API/Models.swift`, `mac/Sources/SessionCore/API/APIClient.swift`, `mac/Sources/SessionApp/AppModel.swift`, `mac/Sources/SessionApp/TodayView.swift`
+- Test: `mac/Tests/SessionCoreTests/APIClientTests.swift`
+
+目标：选择器（开始自定义条目时选分类）不再出现已归档分类；时间轴里历史 session 仍显示分类名与颜色。
+
+1. `Category` 增加 `public var archived: Bool`，解码时缺省为 false（后端不带 `?all=1` 时没有该字段）：
+```swift
+public struct Category: Codable, Equatable, Identifiable, Sendable {
+    public let id: String, name: String, color: String, todoistProjectId: String?
+    public let archived: Bool
+    public init(id: String, name: String, color: String, todoistProjectId: String?, archived: Bool = false) { ... }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id); name = try c.decode(String.self, forKey: .name)
+        color = try c.decode(String.self, forKey: .color)
+        todoistProjectId = try c.decodeIfPresent(String.self, forKey: .todoistProjectId)
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    }
+}
+```
+2. `APIClient.allCategories()`：`GET /categories?all=1`，其余同 `categories()`。
+3. `APIClientTests`：①响应不带 `archived` 时解码为 false；②`allCategories()` 请求带 `all=1`，并能解码 `"archived": true`。
+4. `AppModel`：新增 `@Published var allCategories: [Category]`（历史查找用）；`categories` 保持"未归档"（选择器与 `startTask` 的项目映射用）。`refresh()` 里在 `syncProjects()` 之后再 `try? await api.allCategories()` 赋值；失败不影响其余数据。`category(for:)` 改为先在 `allCategories` 里找，找不到再在 `categories` 里找。
+5. 时间轴 `TimelineView` 取色与标题用 `category(for:)`（已覆盖归档分类）；类别选择器 `Picker` 用 `categories`。
+6. `entries`（最近使用）里引用已归档分类的条目：保留显示，开始时分类沿用；不做额外处理。
+
+验证：`swift test` 全绿，`swift build` 零警告。
+
+```bash
+git add mac/Sources/SessionCore/API mac/Sources/SessionApp/AppModel.swift mac/Sources/SessionApp/TodayView.swift mac/Tests/SessionCoreTests/APIClientTests.swift
+git commit -m "feat(mac): hide archived categories from pickers but keep them for history
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
 # Part E — 手动端到端验证（用户执行，不能交给子代理）
 
 ### Task E1：权限与真实行为走查
@@ -1740,6 +1964,9 @@ cd mac && SESSION_API_TOKEN=<API token> SESSION_FOCUS_SECONDS=90 \
 | 9 | 专注中强制退出客户端再启动（未到点） | 恢复到进行中的专注并继续采集；到点后正常完成 |
 | 10 | 专注中合上屏幕睡眠 1 分钟以上再打开 | 睡眠期间记为一个闲置 span；计时仍以时间戳为准 |
 | 11 | 休息期间切换 App | 不产生 span，不触发拦截 |
+| 12 | 专注中频繁切换 App | 新 span 的 App 随切换及时更新（不是停在旧 App）；若出现陈旧值，按 0.3 节改用 `lsappinfo` |
+| 13 | 专注中全屏播放视频 5 分钟不碰键鼠 | 不出现闲置段（前台 App 持有阻止休眠断言）；停止播放后再不动 2 分钟才出现闲置段 |
+| 14 | 在 Todoist 删除一个有过专注记录的项目，等客户端刷新 | 选择器里不再有该分类；时间轴里历史色块仍显示原分类颜色；在后端 `select archived from categories` 该行为 1，session 行仍在 |
 
 结果写入 `docs/plans/2026-10-25-m2-verification.md` 并提交。有不对的项，把现象告诉实现者修复后重测。
 
@@ -1758,5 +1985,6 @@ cd mac && SESSION_API_TOKEN=<API token> SESSION_FOCUS_SECONDS=90 \
 - **AX / 自动化权限**：对象是"运行 `swift run` 的终端"，不是 SessionApp 本身；M4 打包成 .app 后才会以应用身份授权。授权变更后需要重启客户端。
 - **AppleScript 读 URL** 每 2 秒一次，会在主线程短暂阻塞；若 E1 发现菜单栏倒计时卡顿，把读取移到后台串行队列，并改用 `NSAppleScript` 之外的 ScriptingBridge（作为 M2 内的修复项，不推迟）。
 - **Firefox** 不支持读 URL 与重定向，按 App 粒度处理。
+- **闲置误判**：已用电源断言规避看视频；纯阅读长文仍可能被判为闲置，prompt 里会说明，由 M3 的 LLM 结合上下文判断。
 - **窗口标题隐私**：标题会上传到后端；`url_path` 不采集。这符合"个人自用 + 自托管"的前提，若以后多用户，需要在设置里加"不上传标题"开关（M4 备选）。
 - **GRDB 版本**：D3 Step 0 里用 context7 核对 API，不要凭记忆写。
