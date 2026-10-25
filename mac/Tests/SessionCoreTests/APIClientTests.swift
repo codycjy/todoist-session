@@ -209,6 +209,129 @@ final class APIClientTests: XCTestCase {
     }
 }
 
+final class APIClientEvaluationTests: XCTestCase {
+    override func setUp() { super.setUp(); StubURLProtocol.handler = nil }
+    override func tearDown() { StubURLProtocol.handler = nil; super.tearDown() }
+
+    func makeClient() -> APIClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        return APIClient(baseURL: URL(string: "http://localhost:8787")!, token: "tok", session: URLSession(configuration: config))
+    }
+
+    func testSessionsSendsMillisecondRangeAndDecodesEvaluations() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in
+            captured = req
+            return (200, Data("""
+            {"sessions":[
+             {"id":"s1","categoryId":null,"source":"custom","todoistTaskId":null,"entryId":null,"title":"写周报",
+              "plannedSeconds":1500,"actualSeconds":1500,"startedAt":1761300000000,"endedAt":1761301500000,
+              "evaluation":{"status":"done","focusScore":82,"summary":"专注","attempts":1,
+                            "distractions":[{"start":1761300600000,"end":1761300660000,"reason":"刷微博"}]}},
+             {"id":"s2","categoryId":"c1","source":"todoist","todoistTaskId":"t","entryId":null,"title":"b",
+              "plannedSeconds":1500,"actualSeconds":600,"startedAt":1761302000000,"endedAt":1761302600000,
+              "evaluation":{"status":"pending","focusScore":null,"summary":null,"distractions":[],"attempts":0}},
+             {"id":"s3","categoryId":null,"source":"custom","todoistTaskId":null,"entryId":null,"title":"c",
+              "plannedSeconds":1500,"actualSeconds":600,"startedAt":1761303000000,"endedAt":1761303600000,"evaluation":null}
+            ]}
+            """.utf8))
+        }
+        let from = Date(timeIntervalSince1970: 1_761_264_000), to = Date(timeIntervalSince1970: 1_761_350_400)
+        let sessions = try await makeClient().sessions(from: from, to: to)
+
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertEqual(captured?.url?.path, "/sessions")
+        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "from", value: "1761264000000"), URLQueryItem(name: "to", value: "1761350400000")])
+        XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        XCTAssertEqual(sessions.map(\.id), ["s1", "s2", "s3"])
+        XCTAssertEqual(sessions[0].startedAt, Date(timeIntervalSince1970: 1_761_300_000))
+        XCTAssertEqual(sessions[0].evaluation, Evaluation(
+            status: .done, focusScore: 82, summary: "专注", attempts: 1,
+            distractions: [.init(start: Date(timeIntervalSince1970: 1_761_300_600),
+                                 end: Date(timeIntervalSince1970: 1_761_300_660), reason: "刷微博")]))
+        XCTAssertEqual(sessions[1].evaluation?.status, .pending)
+        XCTAssertNil(sessions[1].evaluation?.focusScore)
+        XCTAssertNil(sessions[2].evaluation)
+    }
+
+    func testRetryEvaluationPostsToSessionPath() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in captured = req; return (202, Data(#"{"status":"pending"}"#.utf8)) }
+        try await makeClient().retryEvaluation(id: "s1")
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertEqual(captured?.url?.path, "/evaluations/s1/retry")
+    }
+
+    func testRetryEvaluationNotFoundThrows() async {
+        StubURLProtocol.handler = { _ in (404, Data(#"{"error":"NOT_FOUND"}"#.utf8)) }
+        do {
+            try await makeClient().retryEvaluation(id: "x")
+            XCTFail("should throw")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .server(status: 404, code: "NOT_FOUND"))
+        } catch { XCTFail("wrong error \(error)") }
+    }
+
+    func testStatsSendsRangeAndTimezoneAndDecodes() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in
+            captured = req
+            return (200, Data("""
+            {"totalFocusSeconds":3000,"sessionCount":2,"avgFocusScore":null,"activeSeconds":2400,"idleSeconds":600,
+             "days":[{"date":"2026-10-25","focusSeconds":3000,"sessionCount":2,"avgFocusScore":null},
+                     {"date":"2026-10-26","focusSeconds":0,"sessionCount":0,"avgFocusScore":75}],
+             "byCategory":[{"categoryId":"c1","focusSeconds":2000},{"categoryId":null,"focusSeconds":1000}]}
+            """.utf8))
+        }
+        let stats = try await makeClient().stats(from: Date(timeIntervalSince1970: 1_761_264_000),
+                                                 to: Date(timeIntervalSince1970: 1_761_350_400), tzOffsetMinutes: 480)
+        XCTAssertEqual(captured?.url?.path, "/stats")
+        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems, [
+            URLQueryItem(name: "from", value: "1761264000000"), URLQueryItem(name: "to", value: "1761350400000"),
+            URLQueryItem(name: "tzOffsetMinutes", value: "480"),
+        ])
+        XCTAssertEqual(stats.totalFocusSeconds, 3000)
+        XCTAssertNil(stats.avgFocusScore)
+        XCTAssertEqual(stats.idleSeconds, 600)
+        XCTAssertEqual(stats.days.map(\.date), ["2026-10-25", "2026-10-26"])
+        XCTAssertEqual(stats.days[1].avgFocusScore, 75)
+        XCTAssertEqual(stats.byCategory.map(\.categoryId), ["c1", nil])
+    }
+
+    func testSettingsDecode() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in
+            captured = req
+            return (200, Data(#"{"focusSeconds":1500,"idleThresholdSeconds":120,"blockApps":["com.a"],"blockDomains":["youtube.com"]}"#.utf8))
+        }
+        let s = try await makeClient().settings()
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertEqual(captured?.url?.path, "/settings")
+        XCTAssertEqual(s, RemoteSettings(focusSeconds: 1500, idleThresholdSeconds: 120,
+                                         blockApps: ["com.a"], blockDomains: ["youtube.com"]))
+    }
+
+    func testUpdateSettingsSendsOnlyProvidedFields() async throws {
+        var captured: URLRequest?
+        var body: [String: Any]?
+        StubURLProtocol.handler = { req in
+            captured = req
+            body = (try? JSONSerialization.jsonObject(with: bodyData(of: req))) as? [String: Any]
+            return (200, Data(#"{"focusSeconds":600,"idleThresholdSeconds":120,"blockApps":[],"blockDomains":["a.com"]}"#.utf8))
+        }
+        let merged = try await makeClient().updateSettings(SettingsPatch(focusSeconds: 600, blockDomains: ["A.com"]))
+        XCTAssertEqual(captured?.httpMethod, "PUT")
+        XCTAssertEqual(captured?.url?.path, "/settings")
+        XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(Set(body?.keys ?? [:].keys), ["focusSeconds", "blockDomains"])
+        XCTAssertEqual(body?["focusSeconds"] as? Int, 600)
+        XCTAssertEqual(body?["blockDomains"] as? [String], ["A.com"])
+        XCTAssertEqual(merged.blockDomains, ["a.com"])
+    }
+}
+
 final class TodoistTaskDueTimeTests: XCTestCase {
     private func task(_ due: String?) -> TodoistTask {
         TodoistTask(id: "t", content: "c", projectId: "p", priority: 1, dueDate: due, isRecurring: false)

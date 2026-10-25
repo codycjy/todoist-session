@@ -74,6 +74,35 @@ public final class APIClient: @unchecked Sendable {
         return try await send("POST", "/sync/sessions", body: body)
     }
 
+    public func sessions(from: Date, to: Date) async throws -> [RemoteSession] {
+        struct R: Decodable { let sessions: [RemoteSession] }
+        let r: R = try await send("GET", "/sessions", query: Self.rangeQuery(from: from, to: to))
+        return r.sessions
+    }
+
+    public func retryEvaluation(id: String) async throws {
+        struct R: Decodable { let status: String }
+        _ = try await send("POST", "/evaluations/\(id)/retry") as R
+    }
+
+    public func stats(from: Date, to: Date, tzOffsetMinutes: Int) async throws -> StatsSummary {
+        try await send("GET", "/stats", query: Self.rangeQuery(from: from, to: to)
+                       + [URLQueryItem(name: "tzOffsetMinutes", value: String(tzOffsetMinutes))])
+    }
+
+    public func settings() async throws -> RemoteSettings {
+        try await send("GET", "/settings")
+    }
+
+    public func updateSettings(_ patch: SettingsPatch) async throws -> RemoteSettings {
+        try await send("PUT", "/settings", body: try JSONEncoder().encode(patch))
+    }
+
+    private static func rangeQuery(from: Date, to: Date) -> [URLQueryItem] {
+        func ms(_ d: Date) -> String { String(Int64((d.timeIntervalSince1970 * 1000).rounded())) }
+        return [URLQueryItem(name: "from", value: ms(from)), URLQueryItem(name: "to", value: ms(to))]
+    }
+
     private func send<T: Decodable>(_ method: String, _ path: String,
                                     query: [URLQueryItem] = [], body: Data? = nil) async throws -> T {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
