@@ -292,6 +292,12 @@ final class APIClientEvaluationTests: XCTestCase {
             URLQueryItem(name: "from", value: "1761264000000"), URLQueryItem(name: "to", value: "1761350400000"),
             URLQueryItem(name: "tzOffsetMinutes", value: "480"),
         ])
+        let withTZ = try await makeClient().stats(from: Date(timeIntervalSince1970: 1_761_264_000),
+                                                  to: Date(timeIntervalSince1970: 1_761_350_400), tzOffsetMinutes: 0,
+                                                  timeZone: TimeZone(identifier: "Europe/London"))
+        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems?.last,
+                       URLQueryItem(name: "tz", value: "Europe/London"))
+        XCTAssertEqual(withTZ.totalFocusSeconds, 3000)
         XCTAssertEqual(stats.totalFocusSeconds, 3000)
         XCTAssertNil(stats.avgFocusScore)
         XCTAssertEqual(stats.idleSeconds, 600)

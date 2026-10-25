@@ -91,9 +91,12 @@ public final class APIClient: @unchecked Sendable {
         _ = try await send("POST", "/evaluations/\(id)/retry") as R
     }
 
-    public func stats(from: Date, to: Date, tzOffsetMinutes: Int) async throws -> StatsSummary {
-        try await send("GET", "/stats", query: Self.rangeQuery(from: from, to: to)
-                       + [URLQueryItem(name: "tzOffsetMinutes", value: String(tzOffsetMinutes))])
+    /// `timeZone` 传 IANA 名称（如 "Europe/London"）时后端按该时区逐日分桶，能正确处理夏令时；
+    /// `tzOffsetMinutes` 仅作为后端不认识 `tz` 时的回退。
+    public func stats(from: Date, to: Date, tzOffsetMinutes: Int, timeZone: TimeZone? = nil) async throws -> StatsSummary {
+        var items = Self.rangeQuery(from: from, to: to) + [URLQueryItem(name: "tzOffsetMinutes", value: String(tzOffsetMinutes))]
+        if let timeZone { items.append(URLQueryItem(name: "tz", value: timeZone.identifier)) }
+        return try await send("GET", "/stats", query: items)
     }
 
     public func settings() async throws -> RemoteSettings {

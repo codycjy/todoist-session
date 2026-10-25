@@ -155,7 +155,8 @@ struct StatsView: View {
         let r = range.interval(now: now, calendar: calendar)
         do {
             let s = try await api.stats(from: r.from, to: r.to,
-                                        tzOffsetMinutes: StatsRange.tzOffsetMinutes(calendar: calendar, at: now))
+                                        tzOffsetMinutes: StatsRange.tzOffsetMinutes(calendar: calendar, at: now),
+                                        timeZone: calendar.timeZone)
             if Task.isCancelled { return }   // 范围已切换：丢弃过期结果
             phase = .loaded(s)
         } catch {
