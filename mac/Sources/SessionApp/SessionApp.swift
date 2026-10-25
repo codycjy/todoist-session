@@ -29,7 +29,7 @@ struct SessionApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Session", id: "main") {
-            TodayView().environmentObject(model).frame(minWidth: 720, minHeight: 480)
+            MainView().environmentObject(model).frame(minWidth: 720, minHeight: 480)
         }
     }
 }
