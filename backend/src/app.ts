@@ -3,6 +3,7 @@ import { auth, type AppEnv } from './auth.js'
 import type { Db } from './db/client.js'
 import { categoryRoutes } from './routes/categories.js'
 import { entryRoutes } from './routes/entries.js'
+import { syncRoutes } from './routes/sync.js'
 import { todoistRoutes } from './routes/todoist.js'
 import type { TodoistGateway } from './todoist/gateway.js'
 
@@ -27,6 +28,7 @@ export function createApp(deps: AppDeps) {
   api.route('/todoist', todoistRoutes({ ...deps, now }))
   api.route('/categories', categoryRoutes(deps.db))
   api.route('/entries', entryRoutes(deps.db, now))
+  api.route('/sync', syncRoutes(deps.db))
   app.route('/', api)
   return app
 }
