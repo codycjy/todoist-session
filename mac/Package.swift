@@ -5,8 +5,9 @@ let package = Package(
     name: "Session",
     platforms: [.macOS(.v14)],
     products: [.executable(name: "SessionApp", targets: ["SessionApp"])],
+    dependencies: [.package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0")],
     targets: [
-        .target(name: "SessionCore"),
+        .target(name: "SessionCore", dependencies: [.product(name: "GRDB", package: "GRDB.swift")]),
         .executableTarget(name: "SessionApp", dependencies: ["SessionCore"]),
         .testTarget(name: "SessionCoreTests", dependencies: ["SessionCore"]),
     ]
