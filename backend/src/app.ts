@@ -4,6 +4,7 @@ import type { Db } from './db/client.js'
 import { categoryRoutes } from './routes/categories.js'
 import { entryRoutes } from './routes/entries.js'
 import { evaluationRoutes, sessionRoutes } from './routes/sessions.js'
+import { settingsRoutes } from './routes/settings.js'
 import { statsRoutes } from './routes/stats.js'
 import { syncRoutes } from './routes/sync.js'
 import { todoistRoutes } from './routes/todoist.js'
@@ -41,6 +42,7 @@ export function createApp(deps: AppDeps) {
   api.route('/sessions', sessionRoutes(deps.db))
   api.route('/evaluations', evaluationRoutes(deps.db, now))
   api.route('/stats', statsRoutes(deps.db))
+  api.route('/settings', settingsRoutes(deps.db))
   app.route('/', api)
   return app
 }
