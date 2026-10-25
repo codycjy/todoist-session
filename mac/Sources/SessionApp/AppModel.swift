@@ -11,8 +11,6 @@ final class AppModel: ObservableObject {
     @Published var categories: [Category] = []
     @Published var entries: [Entry] = []
     @Published var pendingCompletion: CompletedFocus?
-    /// 临时兼容属性：TodayView 在 D8 改为读取 todaySessions 后删除。
-    var finishedToday: [CompletedFocus] { [] }
     @Published var todaySessions: [SessionRecord] = []
     @Published var unsynced = 0
     @Published var accessibilityMissing = false
@@ -75,14 +73,14 @@ final class AppModel: ObservableObject {
         try? store?.pruneOrphanSpans(keeping: activeId)
         reloadToday()
 
-        let sync = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+        let syncT = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.sync?.isDue == true else { return }
                 await self.flushSync()
             }
         }
-        RunLoop.main.add(sync, forMode: .common)
-        syncTimer = sync
+        RunLoop.main.add(syncT, forMode: .common)
+        syncTimer = syncT
 
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main

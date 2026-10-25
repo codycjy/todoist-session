@@ -68,16 +68,15 @@ struct TodayView: View {
             case .idle:
                 if let done = model.pendingCompletion { CompletionBanner(done: done) }
             }
-            Text("今日：\(model.finishedToday.count) 个番茄 · \(model.finishedToday.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
-                .foregroundStyle(.secondary)
-            List(model.finishedToday.reversed(), id: \.run.id) { done in
-                HStack {
-                    Text(done.run.title)
-                    Spacer()
-                    Text(done.endedAt, style: .time).foregroundStyle(.secondary)
-                }
+            if model.unsynced > 0 {
+                Text("\(model.unsynced) 条未同步").font(.caption).foregroundStyle(.orange)
             }
-            Text("时间轴将在 M3 实现").font(.caption).foregroundStyle(.tertiary)
+            if model.accessibilityMissing, case .focusing = model.engine.phase {
+                Text("未授权辅助功能：仅按 App 粒度采集").font(.caption).foregroundStyle(.orange)
+            }
+            Text("今日：\(model.todaySessions.count) 个番茄 · \(model.todaySessions.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
+                .foregroundStyle(.secondary)
+            FocusTimelineView(sessions: model.todaySessions)
         }
         .padding()
     }
