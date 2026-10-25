@@ -2,46 +2,89 @@ import SwiftUI
 import SessionCore
 
 /// 今日专注块时间轴。类型名避开 SwiftUI 自带的 `TimelineView`。
+/// 左列：Todoist 带具体时间的任务（计划）；右列：实际专注块。
 struct FocusTimelineView: View {
     @EnvironmentObject var model: AppModel
     let sessions: [SessionRecord]
+    let tasks: [TodoistTask]
     @State private var selected: String?
 
     private let pointsPerMinute = 1.4
     private let gutter: CGFloat = 48
+    private let defaultTaskMinutes = 30.0
+
+    private var scheduled: [(task: TodoistTask, interval: DateInterval)] {
+        let cal = Calendar.current
+        return tasks.compactMap { task in
+            guard let start = task.dueTime, cal.isDateInToday(start) else { return nil }
+            let minutes = Double(task.durationMinutes ?? Int(defaultTaskMinutes))
+            return (task, DateInterval(start: start, duration: minutes * 60))
+        }
+    }
 
     var body: some View {
         let now = Date()
-        let range = TimelineLayout.range(sessions: sessions, now: now)
+        let scheduled = scheduled
+        let range = TimelineLayout.range(sessions: sessions, scheduled: scheduled.map(\.interval), now: now)
         let blocks = TimelineLayout.blocks(sessions: sessions, rangeStart: range.start, pointsPerMinute: pointsPerMinute)
         let totalHeight = range.end.timeIntervalSince(range.start) / 60 * pointsPerMinute
         let nowY = now.timeIntervalSince(range.start) / 60 * pointsPerMinute
 
-        ScrollView {
-            ZStack(alignment: .topLeading) {
-                ForEach(hourMarks(range), id: \.self) { hour in
-                    let y = hour.timeIntervalSince(range.start) / 60 * pointsPerMinute
-                    HStack(spacing: 6) {
-                        Text(hour, format: .dateTime.hour().minute())
-                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                            .frame(width: gutter - 6, alignment: .trailing)
-                        Divider()
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                GeometryReader { geo in
+                    let columnWidth = max((geo.size.width - gutter - 14) / 2, 40)
+                    ZStack(alignment: .topLeading) {
+                        ForEach(hourMarks(range), id: \.self) { hour in
+                            let y = hour.timeIntervalSince(range.start) / 60 * pointsPerMinute
+                            Text(hour, format: .dateTime.hour().minute())
+                                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                                .frame(width: gutter - 6, alignment: .trailing)
+                                .offset(y: y - 7)
+                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 0.5)
+                                .padding(.leading, gutter).offset(y: y)
+                        }
+                        ForEach(scheduled, id: \.task.id) { item in
+                            let box = TimelineLayout.block(for: item.interval, rangeStart: range.start,
+                                                           pointsPerMinute: pointsPerMinute)
+                            scheduledView(item.task, height: box.height)
+                                .frame(width: columnWidth)
+                                .offset(x: gutter + 4, y: box.top)
+                        }
+                        ForEach(Array(zip(sessions, blocks)), id: \.0.id) { session, block in
+                            blockView(session, block)
+                                .frame(width: columnWidth)
+                                .offset(x: gutter + 10 + columnWidth, y: block.top)
+                        }
+                        Rectangle().fill(Color.red).frame(height: 1)
+                            .padding(.leading, gutter - 4)
+                            .offset(y: nowY)
+                            .accessibilityHidden(true)
+                        Color.clear.frame(width: 1, height: 1).id("now").offset(y: max(nowY - 120, 0))
                     }
-                    .offset(y: y - 7)
+                    .frame(width: geo.size.width, height: totalHeight + 14, alignment: .topLeading)
                 }
-                ForEach(Array(zip(sessions, blocks)), id: \.0.id) { session, block in
-                    blockView(session, block)
-                        .padding(.leading, gutter + 6)
-                        .offset(y: block.top)
-                }
-                Rectangle().fill(Color.red).frame(height: 1)
-                    .padding(.leading, gutter - 4)
-                    .offset(y: nowY)
-                    .accessibilityHidden(true)
+                .frame(height: totalHeight + 14)
             }
-            .frame(height: max(totalHeight, 1) + 14, alignment: .topLeading)
-            .padding(.trailing, 8)
+            .onAppear { DispatchQueue.main.async { proxy.scrollTo("now", anchor: .top) } }
+            .onChange(of: sessions.count) { _, _ in proxy.scrollTo("now", anchor: .top) }
         }
+    }
+
+    private func scheduledView(_ task: TodoistTask, height: Double) -> some View {
+        let color = model.categories.first { $0.todoistProjectId == task.projectId }
+            .map { Color(todoistColor: $0.color) } ?? .gray
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(task.content).font(.caption).lineLimit(height >= 36 ? 2 : 1)
+            if height >= 40, let t = task.dueTime {
+                Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
+        .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .help("Todoist 计划：\(task.content)")
     }
 
     private func hourMarks(_ range: (start: Date, end: Date)) -> [Date] {

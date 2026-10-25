@@ -24,6 +24,20 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(r.end, date(15, 0))
     }
 
+    func testScheduledTasksExtendRange() {
+        let task = DateInterval(start: date(16, 0), duration: 45 * 60)
+        let r = TimelineLayout.range(sessions: [], scheduled: [task], now: date(14, 10), calendar: cal)
+        XCTAssertEqual(r.start, date(9, 0))
+        XCTAssertEqual(r.end, date(17, 0))
+    }
+
+    func testBlockForInterval() {
+        let b = TimelineLayout.block(for: DateInterval(start: date(10, 30), duration: 30 * 60),
+                                      rangeStart: date(10, 0), pointsPerMinute: 2)
+        XCTAssertEqual(b.top, 60)
+        XCTAssertEqual(b.height, 60)
+    }
+
     func testRangeWithoutSessionsStartsNoLaterThanNineAndNowHour() {
         let late = TimelineLayout.range(sessions: [], now: date(14, 10), calendar: cal)
         XCTAssertEqual(late.start, date(9, 0))

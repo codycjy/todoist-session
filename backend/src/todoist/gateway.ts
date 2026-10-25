@@ -5,6 +5,8 @@ export interface TodoistTask {
   priority: number
   dueDate: string | null
   isRecurring: boolean
+  /** 仅当 Todoist 任务设置了以分钟计的时长时才有值 */
+  durationMinutes: number | null
 }
 
 export interface TodoistProject {

@@ -7,10 +7,25 @@ public struct TodoistTask: Codable, Equatable, Identifiable, Sendable {
     public let priority: Int
     public let dueDate: String?
     public let isRecurring: Bool
+    public let durationMinutes: Int?
 
-    public init(id: String, content: String, projectId: String, priority: Int, dueDate: String?, isRecurring: Bool) {
+    public init(id: String, content: String, projectId: String, priority: Int, dueDate: String?, isRecurring: Bool,
+                durationMinutes: Int? = nil) {
         self.id = id; self.content = content; self.projectId = projectId
         self.priority = priority; self.dueDate = dueDate; self.isRecurring = isRecurring
+        self.durationMinutes = durationMinutes
+    }
+
+    /// 带具体时间的到期（`2026-10-25T15:15:00` 浮动本地时间，或带 `Z` 的 UTC）；只有日期时为 nil。
+    public var dueTime: Date? {
+        guard let dueDate, dueDate.count > 10 else { return nil }
+        if dueDate.hasSuffix("Z") || dueDate.contains("+") {
+            return ISO8601DateFormatter().date(from: dueDate)
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f.date(from: String(dueDate.prefix(19)))
     }
 }
 

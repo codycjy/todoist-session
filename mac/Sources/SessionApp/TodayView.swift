@@ -76,7 +76,8 @@ struct TodayView: View {
             }
             Text("今日：\(model.todaySessions.count) 个番茄 · \(model.todaySessions.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
                 .foregroundStyle(.secondary)
-            FocusTimelineView(sessions: model.todaySessions)
+            FocusTimelineView(sessions: model.todaySessions, tasks: model.tasks)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding()
     }

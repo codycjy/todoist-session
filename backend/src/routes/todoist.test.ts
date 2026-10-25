@@ -3,7 +3,7 @@ import { TodoistAuthError, type TodoistGateway } from '../todoist/gateway.js'
 import { authHeader, makeTestApp } from '../testing.js'
 import { categories, users } from '../db/schema.js'
 
-const task = { id: 't1', content: '写周报', projectId: 'p1', priority: 4, dueDate: '2026-10-24', isRecurring: false }
+const task = { id: 't1', content: '写周报', projectId: 'p1', priority: 4, dueDate: '2026-10-24', isRecurring: false, durationMinutes: null }
 
 function gatewayWith(overrides: Partial<TodoistGateway> = {}): TodoistGateway {
   return {

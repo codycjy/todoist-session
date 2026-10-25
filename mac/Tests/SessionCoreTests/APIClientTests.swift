@@ -208,3 +208,22 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(result, SyncResult(accepted: ["s1"], rejected: [.init(id: "s2", reason: "CONFLICT")]))
     }
 }
+
+final class TodoistTaskDueTimeTests: XCTestCase {
+    private func task(_ due: String?) -> TodoistTask {
+        TodoistTask(id: "t", content: "c", projectId: "p", priority: 1, dueDate: due, isRecurring: false)
+    }
+
+    func testDateOnlyHasNoDueTime() { XCTAssertNil(task("2026-10-25").dueTime) }
+    func testNoDueHasNoDueTime() { XCTAssertNil(task(nil).dueTime) }
+
+    func testFloatingTimeIsLocal() {
+        let t = task("2026-10-25T15:15:00").dueTime!
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: t)
+        XCTAssertEqual([c.year, c.month, c.day, c.hour, c.minute], [2026, 10, 25, 15, 15])
+    }
+
+    func testUtcTime() {
+        XCTAssertEqual(task("2026-10-25T07:15:00Z").dueTime, Date(timeIntervalSince1970: 1_792_912_500))
+    }
+}
