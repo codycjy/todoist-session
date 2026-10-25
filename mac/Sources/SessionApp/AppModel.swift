@@ -16,7 +16,8 @@ final class AppModel: ObservableObject {
 
     let engine: TimerEngine
     private let api: APIClient?
-    private var ticker: Timer?
+    /// deinit 非隔离，需要访问 Timer；Timer 只在主 actor 上创建，deinit 时已无其他引用。
+    private nonisolated(unsafe) var ticker: Timer?
 
     /// 默认 25 分钟；开发时可用环境变量 SESSION_FOCUS_SECONDS=10 快速走完整流程。
     private let focusSeconds = Int(ProcessInfo.processInfo.environment["SESSION_FOCUS_SECONDS"] ?? "") ?? 25 * 60
@@ -32,7 +33,7 @@ final class AppModel: ObservableObject {
 
         if let recovered = engine.recovered { complete(recovered) }
         engine.onCompleted = { [weak self] done in
-            // tick() 在主 actor 上调用，此处已在主 actor；闭包类型非隔离，故显式 hop。
+            // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
             Task { @MainActor in self?.complete(done) }
         }
 
@@ -122,7 +123,14 @@ final class AppModel: ObservableObject {
             failures.append(error)
             do { categories = try await api.categories() } catch { failures.append(error) }
         }
-        do { tasks = try await api.tasks(filter: .today) } catch { failures.append(error); tasks = [] }
+        do { tasks = try await api.tasks(filter: .today) } catch {
+            failures.append(error)
+            // 瞬时失败保留旧列表；仅在认证失效/未配置时清空。
+            if case let APIError.server(_, code) = error,
+               code == "TODOIST_AUTH" || code == "TODOIST_NOT_CONFIGURED" {
+                tasks = []
+            }
+        }
         do { entries = try await api.entries() } catch { failures.append(error) }
 
         errorMessage = failures.isEmpty ? nil : Self.describe(failures)
