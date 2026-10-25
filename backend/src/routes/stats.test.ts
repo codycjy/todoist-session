@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { hashToken } from '../crypto.js'
 import { activitySpans, categories, evaluations, sessions, users } from '../db/schema.js'
 import { authHeader, makeTestApp } from '../testing.js'
@@ -149,4 +149,47 @@ it('accepts the +-840 offset limits and requires auth', async () => {
   expect((await stats(app, `?from=0&to=${DAY}&tzOffsetMinutes=840`)).res.status).toBe(200)
   expect((await stats(app, `?from=0&to=${DAY}&tzOffsetMinutes=-840`)).res.status).toBe(200)
   expect((await app.request(`/stats?from=0&to=${DAY}`)).status).toBe(401)
+})
+
+describe('IANA tz bucketing', () => {
+  it('Europe/London DST-change day is a single 25h day', async () => {
+    const { app, db } = makeTestApp()
+    addSession(db, 'a', utc('2026-10-24T23:30Z'), { actualSeconds: 100 }) // 00:30 BST 10-25
+    addSession(db, 'b', utc('2026-10-25T23:30Z'), { actualSeconds: 50 }) // 23:30 GMT 10-25
+    const { body } = await stats(app, `?from=${utc('2026-10-24T23:00Z')}&to=${utc('2026-10-26T00:00Z')}&tz=Europe/London`)
+    expect(body.days).toEqual([{ date: '2026-10-25', focusSeconds: 150, sessionCount: 2, avgFocusScore: null }])
+    expect(body.totalFocusSeconds).toBe(150)
+  })
+
+  it('US/Pacific range spanning the 2026-11-01 change buckets by local date', async () => {
+    const { app, db } = makeTestApp()
+    // PDT until 09:00Z on 11-01; local midnight 10-31 = 07:00Z, 11-02 = 08:00Z
+    addSession(db, 'a', utc('2026-11-01T06:59Z'), { actualSeconds: 10 }) // 10-31 23:59 PDT
+    addSession(db, 'b', utc('2026-11-01T07:00Z'), { actualSeconds: 20 }) // 11-01 00:00 PDT
+    addSession(db, 'c', utc('2026-11-02T07:59Z'), { actualSeconds: 40 }) // 11-01 23:59 PST
+    addSession(db, 'd', utc('2026-11-02T08:00Z'), { actualSeconds: 80 }) // 11-02 00:00 PST
+    const { body } = await stats(app, `?from=${utc('2026-10-31T07:00Z')}&to=${utc('2026-11-03T08:00Z')}&tz=America/Los_Angeles`)
+    expect(body.days.map((d: any) => [d.date, d.focusSeconds])).toEqual([
+      ['2026-10-31', 10], ['2026-11-01', 60], ['2026-11-02', 80],
+    ])
+  })
+
+  it('rejects an invalid tz', async () => {
+    const { app } = makeTestApp()
+    const { res, body } = await stats(app, `?from=0&to=${DAY}&tz=Not/AZone`)
+    expect(res.status).toBe(400)
+    expect(body).toEqual({ error: 'BAD_REQUEST' })
+  })
+
+  it('totals always equal the sum of days, even for rows outside the generated days', async () => {
+    const { app, db } = makeTestApp()
+    // range starts mid-day so every row is in range, but use a coarse fallback offset to stress bucketing
+    addSession(db, 'a', utc('2026-10-25T00:30Z'), { actualSeconds: 7 })
+    addSession(db, 'b', utc('2026-10-25T20:00Z'), { actualSeconds: 9 })
+    const { body } = await stats(app, `?from=${utc('2026-10-25T00:00Z')}&to=${utc('2026-10-26T00:00Z')}&tz=Pacific/Kiritimati`)
+    const sum = body.days.reduce((a: number, d: any) => a + d.focusSeconds, 0)
+    const cnt = body.days.reduce((a: number, d: any) => a + d.sessionCount, 0)
+    expect(sum).toBe(body.totalFocusSeconds)
+    expect(cnt).toBe(body.sessionCount)
+  })
 })
