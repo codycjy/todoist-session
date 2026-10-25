@@ -3,6 +3,12 @@ import Foundation
 public enum APIError: Error, Equatable {
     case server(status: Int, code: String?)
     case transport(String)
+
+    /// 4xx（401/403/429 除外）：请求内容本身被服务端判定无效，重试同样的内容永远不会成功。
+    public var isPermanentRejection: Bool {
+        guard case .server(let status, _) = self else { return false }
+        return (400..<500).contains(status) && ![401, 403, 429].contains(status)
+    }
 }
 
 private struct ErrorBody: Decodable { let error: String? }

@@ -52,11 +52,31 @@ public final class SyncService: @unchecked Sendable {
         do {
             let batch = try store.pending(limit: batchSize)
             guard !batch.isEmpty else { return .nothingToSync }
-            let result = try await uploader.syncSessions(batch)
-            try store.markSynced(result.accepted)
-            try store.markRejected(result.rejected.map(\.id))
+            var accepted = 0, rejected = 0
+            do {
+                let result = try await uploader.syncSessions(batch)
+                try store.markSynced(result.accepted)
+                try store.markRejected(result.rejected.map(\.id))
+                accepted = result.accepted.count; rejected = result.rejected.count
+            } catch let e as APIError where e.isPermanentRejection && batch.count > 1 {
+                // 服务端整批拒绝：逐条重试，把永久无效的 session 隔离出去，避免毒丸阻塞后续同步。
+                for item in batch {
+                    do {
+                        let r = try await uploader.syncSessions([item])
+                        try store.markSynced(r.accepted)
+                        try store.markRejected(r.rejected.map(\.id))
+                        accepted += r.accepted.count; rejected += r.rejected.count
+                    } catch let e as APIError where e.isPermanentRejection {
+                        try store.markRejected([item.session.id])
+                        rejected += 1
+                    }
+                }
+            } catch let e as APIError where e.isPermanentRejection {
+                try store.markRejected(batch.map(\.session.id))
+                rejected = batch.count
+            }
             lock.withLock { backoff.recordSuccess(); nextAttempt = .distantPast }
-            return .synced(accepted: result.accepted.count, rejected: result.rejected.count)
+            return .synced(accepted: accepted, rejected: rejected)
         } catch {
             lock.withLock {
                 backoff.recordFailure()

@@ -101,4 +101,67 @@ final class SyncServiceTests: XCTestCase {
         XCTAssertEqual(outcome, .nothingToSync)
         XCTAssertTrue(uploader.calls.isEmpty)
     }
+
+    // MARK: poison pill
+
+    func testBatch400RetriesIndividuallyAndRejectsOnlyBadOne() async throws {
+        try save("a", start: 1_000); try save("bad", start: 2_000); try save("c", start: 3_000)
+        uploader.respond = { ids in
+            ids.contains("bad") ? .failure(APIError.server(status: 400, code: "invalid")) : .success(SyncResult(accepted: ids, rejected: []))
+        }
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .synced(accepted: 2, rejected: 1))
+        let all = try store.sessions(from: .distantPast, to: .distantFuture)
+        XCTAssertEqual(all.first { $0.id == "bad" }?.syncState, .rejected)
+        XCTAssertEqual(all.first { $0.id == "a" }?.syncState, .synced)
+        XCTAssertEqual(all.first { $0.id == "c" }?.syncState, .synced)
+        XCTAssertTrue(service.isDue)
+    }
+
+    func testSingleSession400IsRejectedWithoutRetryLoop() async throws {
+        try save("bad")
+        uploader.respond = { _ in .failure(APIError.server(status: 422, code: nil)) }
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .synced(accepted: 0, rejected: 1))
+        XCTAssertEqual(uploader.calls.count, 1)
+        XCTAssertEqual(try store.pendingCount(), 0)
+    }
+
+    func testServerErrorsDuringIndividualRetryBackOff() async throws {
+        try save("a", start: 1_000); try save("b", start: 2_000)
+        uploader.respond = { ids in
+            ids.count > 1 ? .failure(APIError.server(status: 400, code: nil)) : .failure(APIError.server(status: 503, code: nil))
+        }
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(try store.pendingCount(), 2)
+        XCTAssertFalse(service.isDue)
+    }
+
+    func testNonPermanentStatusesDoNotSplit() async throws {
+        for status in [401, 403, 429, 500, 503] {
+            let st = try LocalStore(path: nil)
+            let up = FakeUploader()
+            let svc = SyncService(store: st, uploader: up, clock: FakeClock())
+            for (i, id) in ["a", "b"].enumerated() {
+                try st.save(SessionRecord(id: id, title: "t", categoryId: nil, source: .custom, todoistTaskId: nil,
+                                          entryId: nil, plannedSeconds: 60, actualSeconds: 60,
+                                          startedAt: Date(timeIntervalSince1970: Double(1_000 + i * 100)),
+                                          endedAt: Date(timeIntervalSince1970: Double(1_060 + i * 100))))
+            }
+            up.result = .failure(APIError.server(status: status, code: nil))
+            let outcome = await svc.flush()
+            XCTAssertEqual(outcome, .failed, "status \(status)")
+            XCTAssertEqual(up.calls.count, 1, "status \(status)")
+            XCTAssertEqual(try st.pendingCount(), 2)
+        }
+    }
+
+    func testTransportErrorDoesNotSplit() async throws {
+        try save("a", start: 1_000); try save("b", start: 2_000)
+        uploader.result = .failure(APIError.transport("offline"))
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(uploader.calls.count, 1)
+    }
 }
