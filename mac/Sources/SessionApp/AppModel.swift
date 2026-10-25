@@ -57,11 +57,14 @@ final class AppModel: ObservableObject {
         // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
         if let recovered = engine.recovered {
             tracker?.closeRecovered(run: recovered.run, at: recovered.endedAt)
-            complete(recovered)
+            complete(recovered, live: false)
+        } else if case .idle = engine.phase {
+            // 上次异常退出时可能留下被重定向的标签页；有进行中的 session 时不能还原。
+            Browser.restoreAll()
         }
         engine.onCompleted = { [weak self] done in
             // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
-            Task { @MainActor in self?.complete(done) }
+            Task { @MainActor in self?.complete(done, live: true) }
         }
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -236,24 +239,34 @@ final class AppModel: ObservableObject {
     /// 拉取今日评估。未配置后端或离线时静默：不改错误条，保留已有数据。
     func refreshEvaluations() async {
         guard let api else { return }
-        let start = Calendar.current.startOfDay(for: Date())
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        let today = Calendar.current.startOfDay(for: Date())
+        // 从昨天起取：跨午夜仍在 pending 的评估也要继续轮询到终态。
+        let start = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today.addingTimeInterval(-86_400)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
         if let sessions = try? await api.sessions(from: start, to: end) {
             evaluations.merge(EvaluationDisplay.evaluations(from: sessions)) { _, new in new }
         }
         updateEvaluationPolling()
     }
 
-    /// 失败的评估重新排队后立即重新拉取；失败时静默。
+    /// 失败的评估重新排队后立即重新拉取。用户主动触发，失败时给出短暂提示（4 秒后自动消失）。
     func retryEvaluation(sessionId: String) async {
         guard let api else { return }
-        try? await api.retryEvaluation(id: sessionId)
+        do { try await api.retryEvaluation(id: sessionId) }
+        catch {
+            let message = "重试评估失败，请稍后再试"
+            errorMessage = message
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                if self?.errorMessage == message { self?.errorMessage = nil }
+            }
+        }
         await refreshEvaluations()
     }
 
     /// 有 pending 时每 15 秒轮询一次，全部终态后停止。
     private func updateEvaluationPolling() {
-        let needed = EvaluationDisplay.needsPolling(evaluations, sessionIds: todaySessions.map(\.id))
+        let needed = EvaluationDisplay.needsPolling(evaluations, sessionIds: Array(evaluations.keys))
         if !needed {
             evaluationPoll?.cancel(); evaluationPoll = nil
         } else if evaluationPoll == nil {
@@ -307,11 +320,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func complete(_ done: CompletedFocus) {
+    /// `live`：false 表示启动时从持久化状态恢复的、已在 App 关闭期间结束的 session，不再弹通知。
+    private func complete(_ done: CompletedFocus, live: Bool) {
         tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
-        try? store?.save(SessionRecord(done))
+        do { try store?.save(SessionRecord(done)) }
+        catch { errorMessage = "保存专注记录失败：\(error.localizedDescription)" }
         pendingCompletion = done
-        Notifier.focusCompleted(title: done.run.title)
+        if live { Notifier.focusCompleted(title: done.run.title) }
         reloadToday()
         objectWillChange.send()
         Task { await flushSync() }
