@@ -15,6 +15,13 @@
       "when": 1792967706502,
       "tag": "0001_happy_agent_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792970503991,
+      "tag": "0002_puzzling_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

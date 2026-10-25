@@ -12,6 +12,9 @@ export interface AppDeps {
   makeGateway: (token: string) => TodoistGateway
   secret: string
   now?: () => number
+  /** 新 session 的 pending 评估记录的模型名 / prompt 版本 */
+  evalModel?: string
+  evalPromptVersion?: string
 }
 
 export function createApp(deps: AppDeps) {
@@ -28,7 +31,11 @@ export function createApp(deps: AppDeps) {
   api.route('/todoist', todoistRoutes({ ...deps, now }))
   api.route('/categories', categoryRoutes(deps.db))
   api.route('/entries', entryRoutes(deps.db, now))
-  api.route('/sync', syncRoutes(deps.db))
+  api.route('/sync', syncRoutes(deps.db, {
+    now,
+    model: deps.evalModel ?? 'claude-haiku-5-5',
+    promptVersion: deps.evalPromptVersion ?? 'v1',
+  }))
   app.route('/', api)
   return app
 }

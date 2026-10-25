@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
 import type { Db } from '../db/client.js'
-import { activitySpans, categories, entries, sessions } from '../db/schema.js'
+import { activitySpans, categories, entries, evaluations, sessions } from '../db/schema.js'
 
 const id = z.string().min(1).max(64)
 const ms = z.number().int().nonnegative()
@@ -37,7 +37,13 @@ const bodySchema = z.object({ sessions: z.array(sessionSchema).min(1).max(50) })
 type Rejection = { id: string; reason: 'CONFLICT' | 'INVALID_TIME' }
 const SPAN_CHUNK = 200 // 11 列 × 200 = 2200 个绑定参数，低于 SQLite 上限
 
-export function syncRoutes(db: Db) {
+export interface SyncOptions {
+  now: () => number
+  model: string
+  promptVersion: string
+}
+
+export function syncRoutes(db: Db, opts: SyncOptions) {
   const r = new Hono<AppEnv>()
 
   r.post('/sessions', async (c) => {
@@ -68,6 +74,12 @@ export function syncRoutes(db: Db) {
           id: s.id, userId, categoryId, source: s.source, todoistTaskId: s.todoistTaskId, entryId,
           titleSnapshot: s.title, plannedSeconds: s.plannedSeconds, actualSeconds: s.actualSeconds,
           startedAt: new Date(s.startedAt), endedAt: new Date(s.endedAt),
+        }).run()
+
+        const at = new Date(opts.now())
+        tx.insert(evaluations).values({
+          sessionId: s.id, userId, model: opts.model, promptVersion: opts.promptVersion,
+          createdAt: at, updatedAt: at,
         }).run()
 
         for (let i = 0; i < s.spans.length; i += SPAN_CHUNK) {

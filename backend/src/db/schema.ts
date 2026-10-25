@@ -70,8 +70,38 @@ export const activitySpans = sqliteTable(
   (t) => [index('spans_session').on(t.sessionId)],
 )
 
+export interface Distraction {
+  start: number
+  end: number
+  reason: string
+}
+
+export const evaluations = sqliteTable(
+  'evaluations',
+  {
+    sessionId: text('session_id').primaryKey().references(() => sessions.id),
+    userId: text('user_id').notNull().references(() => users.id),
+    status: text('status', { enum: ['pending', 'done', 'failed'] }).notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    focusScore: integer('focus_score'),
+    summary: text('summary'),
+    distractions: text('distractions', { mode: 'json' })
+      .$type<Distraction[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    model: text('model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    // 只存错误类别（API_ERROR / BAD_OUTPUT / TIMEOUT），不存响应体或 Key
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('evaluations_status').on(t.status, t.attempts)],
+)
+
 export type User = typeof users.$inferSelect
 export type Category = typeof categories.$inferSelect
 export type Entry = typeof entries.$inferSelect
 export type SessionRow = typeof sessions.$inferSelect
 export type ActivitySpanRow = typeof activitySpans.$inferSelect
+export type EvaluationRow = typeof evaluations.$inferSelect
