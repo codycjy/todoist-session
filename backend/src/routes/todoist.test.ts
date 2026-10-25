@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { TodoistAuthError, type TodoistGateway } from '../todoist/gateway.js'
 import { authHeader, makeTestApp } from '../testing.js'
-import { categories } from '../db/schema.js'
+import { categories, users } from '../db/schema.js'
 
 const task = { id: 't1', content: '写周报', projectId: 'p1', priority: 4, dueDate: '2026-10-24', isRecurring: false }
 
@@ -82,4 +82,24 @@ it('projects upserts categories idempotently and picks up renames', async () => 
   expect(body.categories).toHaveLength(1)
   expect(body.categories[0]).toMatchObject({ name: 'Work 2', color: 'blue', todoistProjectId: 'p1' })
   expect(db.select().from(categories).all()).toHaveLength(1)
+})
+
+it('returns 409 TODOIST_TOKEN_UNREADABLE when the stored token cannot be decrypted', async () => {
+  const { app, db } = makeTestApp({ gateway: gatewayWith() })
+  db.update(users).set({ todoistTokenEnc: 'garbage' }).run()
+  for (const path of ['/todoist/tasks', '/todoist/projects']) {
+    const res = await app.request(path, { headers: authHeader })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'TODOIST_TOKEN_UNREADABLE' })
+  }
+})
+
+it('maps unexpected errors to a JSON 500 INTERNAL', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const gateway = gatewayWith({ tasks: vi.fn(async () => { throw new Error('boom') }) })
+  const { app } = makeTestApp({ gateway })
+  const res = await app.request('/todoist/tasks', { headers: authHeader })
+  expect(res.status).toBe(500)
+  expect(await res.json()).toEqual({ error: 'INTERNAL' })
+  spy.mockRestore()
 })

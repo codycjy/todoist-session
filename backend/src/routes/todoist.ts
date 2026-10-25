@@ -21,13 +21,24 @@ export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps
   const r = new Hono<AppEnv>()
   const taskCache = new TtlCache<TodoistTask[]>(60_000, now)
 
-  const gatewayFor = (enc: string | null) => (enc ? makeGateway(decrypt(enc, secret)) : null)
+  const UNREADABLE = Symbol('unreadable')
+  const gatewayFor = (enc: string | null): TodoistGateway | null | typeof UNREADABLE => {
+    if (!enc) return null
+    let token: string
+    try {
+      token = decrypt(enc, secret)
+    } catch {
+      return UNREADABLE
+    }
+    return makeGateway(token)
+  }
 
   r.get('/tasks', async (c) => {
     const query = QUERIES[c.req.query('filter') ?? 'today']
     if (!query) return c.json({ error: 'BAD_REQUEST' }, 400)
     const user = c.get('user')
     const gateway = gatewayFor(user.todoistTokenEnc)
+    if (gateway === UNREADABLE) return c.json({ error: 'TODOIST_TOKEN_UNREADABLE' }, 409)
     if (!gateway) return c.json({ error: 'TODOIST_NOT_CONFIGURED' }, 409)
     try {
       const tasks = await taskCache.get(`${user.id}:${query}`, () => gateway.tasks(query))
@@ -41,6 +52,7 @@ export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps
   r.get('/projects', async (c) => {
     const user = c.get('user')
     const gateway = gatewayFor(user.todoistTokenEnc)
+    if (gateway === UNREADABLE) return c.json({ error: 'TODOIST_TOKEN_UNREADABLE' }, 409)
     if (!gateway) return c.json({ error: 'TODOIST_NOT_CONFIGURED' }, 409)
     try {
       for (const p of await gateway.projects()) {

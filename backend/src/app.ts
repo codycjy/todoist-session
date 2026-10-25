@@ -16,6 +16,10 @@ export interface AppDeps {
 export function createApp(deps: AppDeps) {
   const now = deps.now ?? Date.now
   const app = new Hono()
+  app.onError((err, c) => {
+    console.error('unhandled error:', err instanceof Error ? err.message : 'unknown')
+    return c.json({ error: 'INTERNAL' }, 500)
+  })
   app.get('/health', (c) => c.json({ ok: true }))
 
   const api = new Hono<AppEnv>()

@@ -134,11 +134,12 @@ final class AppModel: ObservableObject {
                 switch code {
                 case "TODOIST_AUTH": return "Todoist token 已失效，请重新生成并运行 seed"
                 case "TODOIST_NOT_CONFIGURED": return "后端未配置 Todoist token"
+                case "TODOIST_TOKEN_UNREADABLE": return "后端无法解密 Todoist token（APP_SECRET 变了？），请重新运行 seed"
                 default: break
                 }
             }
         }
-        return "无法连接后端：\(failures[0])"
+        return "无法连接后端"
     }
 
     // MARK: 内部
