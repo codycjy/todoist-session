@@ -21,3 +21,12 @@ it('allows multiple categories with NULL todoist_project_id but not duplicate pr
     db.insert(categories).values({ ...base, id: 'c4', name: 'D', todoistProjectId: 'p1' }).run(),
   ).toThrow()
 })
+
+it('creates sessions and activity_spans tables via migrations', () => {
+  const db = createDb(':memory:')
+  const names = db.$client
+    .prepare("select name from sqlite_master where type = 'table'")
+    .all()
+    .map((r) => (r as { name: string }).name)
+  expect(names).toEqual(expect.arrayContaining(['sessions', 'activity_spans']))
+})
