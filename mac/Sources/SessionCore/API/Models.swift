@@ -36,3 +36,9 @@ public struct Entry: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum TaskFilter: String, Sendable { case today, overdue }
+
+public struct SyncResult: Decodable, Equatable, Sendable {
+    public struct Rejection: Decodable, Equatable, Sendable { public let id: String; public let reason: String }
+    public let accepted: [String]
+    public let rejected: [Rejection]
+}

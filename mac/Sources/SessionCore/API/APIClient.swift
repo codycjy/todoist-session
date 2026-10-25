@@ -46,6 +46,28 @@ public final class APIClient: @unchecked Sendable {
         return (try await send("POST", "/entries", body: body) as R).entry
     }
 
+    public func syncSessions(_ batch: [(session: SessionRecord, spans: [ActivitySpan])]) async throws -> SyncResult {
+        func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
+        func orNull(_ s: String?) -> Any { s ?? NSNull() }
+        let sessions: [[String: Any]] = batch.map { item in
+            let s = item.session
+            return [
+                "id": s.id, "categoryId": orNull(s.categoryId), "source": s.source.rawValue,
+                "todoistTaskId": orNull(s.todoistTaskId), "entryId": orNull(s.entryId),
+                "title": s.title, "plannedSeconds": s.plannedSeconds, "actualSeconds": s.actualSeconds,
+                "startedAt": ms(s.startedAt), "endedAt": ms(s.endedAt),
+                "spans": item.spans.map { p -> [String: Any] in [
+                    "id": p.id, "kind": p.kind.rawValue, "appBundleId": orNull(p.appBundleId),
+                    "appName": orNull(p.appName), "windowTitle": orNull(p.windowTitle),
+                    "urlHost": orNull(p.urlHost), "urlPath": orNull(p.urlPath),
+                    "startedAt": ms(p.startedAt), "endedAt": ms(p.endedAt), "wasBlocked": p.wasBlocked,
+                ] },
+            ]
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["sessions": sessions])
+        return try await send("POST", "/sync/sessions", body: body)
+    }
+
     private func send<T: Decodable>(_ method: String, _ path: String,
                                     query: [URLQueryItem] = [], body: Data? = nil) async throws -> T {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)

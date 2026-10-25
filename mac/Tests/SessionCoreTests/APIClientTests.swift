@@ -158,4 +158,32 @@ final class APIClientTests: XCTestCase {
         _ = try await makeClient().createEntry(title: "t", categoryId: "c1")
         XCTAssertEqual(body?["categoryId"] as? String, "c1")
     }
+
+    func testSyncSessionsSendsMillisecondsAndNullsAndDecodesResult() async throws {
+        var captured: URLRequest?
+        var body: [String: Any]?
+        StubURLProtocol.handler = { req in
+            captured = req
+            body = (try? JSONSerialization.jsonObject(with: bodyData(of: req))) as? [String: Any]
+            return (200, Data(#"{"accepted":["s1"],"rejected":[{"id":"s2","reason":"CONFLICT"}]}"#.utf8))
+        }
+        let rec = SessionRecord(id: "s1", title: "写周报", categoryId: nil, source: .custom, todoistTaskId: nil,
+                                entryId: nil, plannedSeconds: 1500, actualSeconds: 1500,
+                                startedAt: Date(timeIntervalSince1970: 1_761_300_000), endedAt: Date(timeIntervalSince1970: 1_761_301_500))
+        let span = ActivitySpan(id: "p1", sessionId: "s1", kind: .active, appBundleId: "com.apple.dt.Xcode", appName: "Xcode",
+                                windowTitle: nil, urlHost: nil, startedAt: Date(timeIntervalSince1970: 1_761_300_000),
+                                endedAt: Date(timeIntervalSince1970: 1_761_300_060), wasBlocked: true)
+        let result = try await makeClient().syncSessions([(rec, [span])])
+
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertEqual(captured?.url?.path, "/sync/sessions")
+        XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        let sessions = body?["sessions"] as? [[String: Any]]
+        XCTAssertEqual((sessions?[0]["startedAt"] as? NSNumber)?.int64Value, 1_761_300_000_000)
+        XCTAssertTrue(sessions?[0]["categoryId"] is NSNull)
+        let spans = sessions?[0]["spans"] as? [[String: Any]]
+        XCTAssertEqual(spans?[0]["wasBlocked"] as? Bool, true)
+        XCTAssertTrue(spans?[0]["windowTitle"] is NSNull)
+        XCTAssertEqual(result, SyncResult(accepted: ["s1"], rejected: [.init(id: "s2", reason: "CONFLICT")]))
+    }
 }
