@@ -223,21 +223,12 @@ final class AppModel: ObservableObject {
     func dismissCompletion() { pendingCompletion = nil }
     func endBreak() { engine.endBreak(); objectWillChange.send() }
 
-    /// 三个请求相互独立：任何一个失败都不影响其余数据加载。
+    /// 请求相互独立：任何一个失败都不影响其余数据加载。
     func refresh() async {
         guard let api else { return }
         var failures: [Error] = []
 
-        // /todoist/projects 会先同步 Todoist 项目，再返回全部未归档分类（含自定义），
-        // 是 /categories 的超集；失败时回退到 /categories，避免重复合并。
-        do {
-            categories = try await api.syncProjects()
-        } catch {
-            failures.append(error)
-            do { categories = try await api.categories() } catch { failures.append(error) }
-        }
-        // 失败只影响历史分类查找，不计入错误提示。
-        if let all = try? await api.allCategories() { allCategories = all }
+        // 只关心今天：先拿今日任务，再只同步这些任务所在的项目（不做全量项目管理）。
         do { tasks = try await api.tasks(filter: .today) } catch {
             failures.append(error)
             // 瞬时失败保留旧列表；仅在认证失效/未配置时清空。
@@ -246,6 +237,19 @@ final class AppModel: ObservableObject {
                 tasks = []
             }
         }
+        let projectIds = Array(Set(tasks.map(\.projectId))).sorted()
+        // 同步失败时回退到 /categories；两者都只留自定义分类和今日任务的项目。
+        let fetched: [Category]?
+        do { fetched = try await api.syncProjects(ids: projectIds) } catch {
+            failures.append(error)
+            do { fetched = try await api.categories() } catch { failures.append(error); fetched = nil }
+        }
+        if let fetched {
+            let today = Set(projectIds)
+            categories = fetched.filter { $0.todoistProjectId.map(today.contains) ?? true }
+        }
+        // 失败只影响历史分类查找，不计入错误提示。
+        if let all = try? await api.allCategories() { allCategories = all }
         do { entries = try await api.entries() } catch { failures.append(error) }
 
         errorMessage = failures.isEmpty ? nil : Self.describe(failures)
@@ -382,7 +386,10 @@ final class AppModel: ObservableObject {
         let now = Date()
         categories = DemoData.categories; allCategories = DemoData.categories
         entries = DemoData.entries; tasks = DemoData.tasks(now: now)
-        for s in DemoData.sessions(now: now) { try? store?.save(s) }
+        for s in DemoData.sessions(now: now) {
+            try? store?.save(s)
+            try? store?.append(DemoData.spans(for: s))
+        }
         evaluations = DemoData.evaluations
         if DemoData.startsFocus, let t = tasks.first { startTask(t) }
     }

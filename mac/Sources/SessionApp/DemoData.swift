@@ -9,6 +9,7 @@ enum DemoData {
     /// 截图路径：渲染主窗口到 PNG 后退出（自己渲染自己的窗口，不需要屏幕录制权限）。
     static var snapshotPath: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_SNAPSHOT"] }
     static var selectedTaskId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SELECT"] : nil }
+    static var selectedSessionId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SESSION"] : nil }
     static var initialTab: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_TAB"] }
     static var appearance: NSAppearance.Name? {
         switch ProcessInfo.processInfo.environment["SESSION_DEMO_APPEARANCE"] {
@@ -92,10 +93,35 @@ enum DemoData {
         ]
     }
 
+    /// 每个演示专注的活动片段：按固定比例切成几个 App，s2 带一次被拦截的网站。
+    static func spans(for s: SessionRecord) -> [ActivitySpan] {
+        let plan: [(String?, String?, String?, Double, Bool)] = switch s.id {
+        case "s1": [("Preview", "attention-is-all-you-need.pdf", nil, 0.45, false), ("Obsidian", "论文笔记", nil, 0.35, false),
+                    ("微信", nil, nil, 0.05, false), ("Preview", "attention-is-all-you-need.pdf", nil, 0.15, false)]
+        case "s2": [("Preview", "paper.pdf", nil, 0.5, false), ("Google Chrome", nil, "bilibili.com", 0.12, true),
+                    (nil, nil, nil, 0.08, false), ("Google Chrome", nil, "bilibili.com", 0.12, false), ("Preview", "paper.pdf", nil, 0.18, false)]
+        case "s3": [("Pages", "周报.pages", nil, 0.7, false), ("Slack", "#team", nil, 0.3, false)]
+        default: [("Session", nil, nil, 1, false)]
+        }
+        var t = s.startedAt
+        let total = s.endedAt.timeIntervalSince(s.startedAt)
+        return plan.map { app, title, host, frac, blocked in
+            let end = t.addingTimeInterval(total * frac)
+            defer { t = end }
+            return ActivitySpan(sessionId: s.id, kind: app == nil ? .idle : .active, appBundleId: nil, appName: app,
+                                windowTitle: title, urlHost: host, startedAt: t, endedAt: end, wasBlocked: blocked)
+        }
+    }
+
     static let evaluations: [String: Evaluation] = [
-        "s1": Evaluation(status: .done, focusScore: 88, summary: "基本一直在 PDF 阅读器和笔记之间切换，中途看了一次微信。",
+        "s1": Evaluation(status: .done, focusScore: 88,
+                         summary: "这一段基本都在 PDF 阅读器和 Obsidian 之间切换，阅读和做笔记交替进行，节奏稳定。中途打开过一次微信回复消息，约 1 分钟后回到论文，整体与「读论文」的目标高度一致。",
                          attempts: 1, distractions: []),
-        "s2": Evaluation(status: .done, focusScore: 64, summary: "后半段多次打开 B 站。", attempts: 1, distractions: []),
+        "s2": Evaluation(status: .done, focusScore: 64, summary: "前半段在读论文，后半段多次打开 B 站，累计约 6 分钟与任务无关。",
+                         attempts: 1, distractions: [
+                            .init(start: Date().addingTimeInterval(-188 * 60), end: Date().addingTimeInterval(-185 * 60), reason: "在 bilibili.com 看推荐视频"),
+                            .init(start: Date().addingTimeInterval(-181 * 60), end: Date().addingTimeInterval(-178 * 60), reason: "再次打开 bilibili.com"),
+                         ]),
         "s3": Evaluation(status: .pending, focusScore: nil, summary: nil, attempts: 0, distractions: []),
         "s4": Evaluation(status: .failed, focusScore: nil, summary: nil, attempts: 3, distractions: []),
     ]

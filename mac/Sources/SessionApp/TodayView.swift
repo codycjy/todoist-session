@@ -4,19 +4,28 @@ import SessionCore
 /// 今日页：中间是「今天这一页」（日期、开始面板 / 计时器、任务分组），右侧是时间轴。
 struct TodayView: View {
     @EnvironmentObject var model: AppModel
-    /// 侧栏选中某个项目时只显示该项目的任务。
-    var projectFilter: String?
 
     @State private var title = ""
     @State private var categoryId: String?
     @State private var minutes: Int?
     @State private var selectedTaskId: String? = DemoData.selectedTaskId
+    /// 时间轴上点开的专注块；与选中任务互斥，底部同一时间只有一个详情面板。
+    @State private var selectedSessionId: String? = DemoData.selectedSessionId
     @FocusState private var composerFocused: Bool
 
     private var idle: Bool { model.engine.phase == .idle }
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var effectiveMinutes: Int { minutes ?? model.defaultFocusSeconds / 60 }
     private var selectedTask: TodoistTask? { model.tasks.first { $0.id == selectedTaskId } }
+    private var selectedSession: SessionRecord? { model.todaySessions.first { $0.id == selectedSessionId } }
+    private var hasPanel: Bool { selectedTask != nil || selectedSession != nil }
+
+    private func select(task id: String?) {
+        withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = id; if id != nil { selectedSessionId = nil } }
+    }
+    private func select(session id: String?) {
+        withAnimation(.easeOut(duration: 0.18)) { selectedSessionId = id; if id != nil { selectedTaskId = nil } }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -49,7 +58,7 @@ struct TodayView: View {
                     }
                 }
                 .padding(.horizontal, 32).padding(.top, 44)
-                .padding(.bottom, selectedTask == nil ? 32 : 300)
+                .padding(.bottom, hasPanel ? 340 : 32)
                 .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -57,7 +66,12 @@ struct TodayView: View {
                 TaskDetailPanel(task: task, category: category(of: task), canStart: idle,
                                 defaultMinutes: model.defaultFocusSeconds / 60,
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
-                                onClose: { withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = nil } })
+                                onClose: { select(task: nil) })
+                    .padding(.horizontal, 28).padding(.bottom, 20)
+                    .frame(maxWidth: 720)
+            } else if let session = selectedSession {
+                SessionDetailPanel(session: session, onShowTask: { select(task: $0.id) },
+                                   onClose: { select(session: nil) })
                     .padding(.horizontal, 28).padding(.bottom, 20)
                     .frame(maxWidth: 720)
             }
@@ -70,15 +84,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(now.formatted(.dateTime.weekday(.wide).locale(Self.zh)) + " · 第 \(Calendar.current.component(.weekOfYear, from: now)) 周")
                     .font(.inkMono(11)).foregroundStyle(Ink.sub)
-                HStack(alignment: .lastTextBaseline, spacing: 10) {
-                    Text(now.formatted(.dateTime.month().day().locale(Self.zh))).font(.system(size: 30, weight: .bold))
-                    if let p = projectFilter, let c = model.categories.first(where: { $0.todoistProjectId == p }) {
-                        HStack(spacing: 6) {
-                            CategoryMark(color: Color(todoistColor: c.color), size: 9)
-                            Text(c.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Ink.sub)
-                        }
-                    }
-                }
+                Text(now.formatted(.dateTime.month().day().locale(Self.zh))).font(.system(size: 30, weight: .bold))
             }
             Spacer()
             Text(Ink.hm(now)).font(.inkMono(15)).foregroundStyle(Ink.sub)
@@ -152,7 +158,7 @@ struct TodayView: View {
     // MARK: 任务分组
 
     private var taskSections: some View {
-        let groups = TaskGroups(tasks: model.tasks.filter { projectFilter == nil || $0.projectId == projectFilter })
+        let groups = TaskGroups(tasks: model.tasks)
         return VStack(alignment: .leading, spacing: 22) {
             if groups.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -211,9 +217,7 @@ struct TodayView: View {
         .contentShape(Rectangle())
         .hoverRow(selected: selected)
         .overlay(alignment: .bottom) { if !selected { Rectangle().fill(Ink.ruleSoft).frame(height: 1) } }
-        .onTapGesture {
-            withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = selected ? nil : task.id }
-        }
+        .onTapGesture { select(task: selected ? nil : task.id) }
     }
 
     private func timeLabel(_ task: TodoistTask, overdue: Bool) -> String {
@@ -246,10 +250,10 @@ struct TodayView: View {
             .padding(.horizontal, 16).padding(.top, 46).padding(.bottom, 12)
             Rectangle().fill(Ink.rule).frame(height: 1)
             FocusTimelineView(sessions: model.todaySessions,
-                              tasks: model.tasks.filter { projectFilter == nil || $0.projectId == projectFilter },
-                              selectedTaskId: selectedTaskId) { task in
-                withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = task.id }
-            }
+                              tasks: model.tasks,
+                              selectedTaskId: selectedTaskId, selectedSessionId: selectedSessionId,
+                              onSelectTask: { select(task: $0.id) },
+                              onSelectSession: { s in select(session: selectedSessionId == s.id ? nil : s.id) })
         }
         .background(Ink.shelf)
     }
@@ -345,7 +349,7 @@ private struct FocusCard: View {
 }
 
 /// 进度尺：每分钟一个刻度，每 5 分钟长刻度，已过部分用荧光笔涂满。
-private struct ProgressRule: View {
+struct ProgressRule: View {
     let progress: Double
     let minutes: Int
 

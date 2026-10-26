@@ -36,6 +36,7 @@ private struct SettingsForm: View {
                 switch section {
                 case .timing: timing
                 case .blocking: blocking
+                case .appearance: AppearancePicker()
                 case .backend: backend
                 case .permissions: PermissionRows().environmentObject(model.permissions)
                 }
@@ -234,5 +235,71 @@ private struct StepperField: View {
             Image(systemName: icon).font(.system(size: 10, weight: .bold)).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 外观页：三张小样卡片，点选即生效。
+private struct AppearancePicker: View {
+    @AppStorage(AppearanceMode.key) private var raw = AppearanceMode.system.rawValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("主窗口和菜单栏面板一起切换。侧栏底部的小图标也可以快速切换。")
+                .font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+            HStack(spacing: 14) {
+                ForEach(AppearanceMode.allCases) { mode in card(mode) }
+            }
+        }
+    }
+
+    private func card(_ mode: AppearanceMode) -> some View {
+        let selected = raw == mode.rawValue
+        return Button {
+            raw = mode.rawValue
+            mode.apply()
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                swatch(mode).frame(height: 84)
+                HStack(spacing: 6) {
+                    Image(systemName: selected ? "checkmark.square.fill" : "square").font(.system(size: 12))
+                    Text(mode.label).font(.system(size: 13, weight: selected ? .semibold : .regular))
+                }
+            }
+            .padding(10)
+            .frame(width: 168)
+            .background(selected ? Ink.panel : Color.clear)
+            .overlay(Rectangle().strokeBorder(selected ? Ink.ink : Ink.rule, lineWidth: selected ? 1.5 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 小样：纸色底 + 几条墨线 + 一个荧光块；跟随系统时左右各半。
+    @ViewBuilder private func swatch(_ mode: AppearanceMode) -> some View {
+        switch mode {
+        case .light: page(dark: false)
+        case .dark: page(dark: true)
+        case .system:
+            HStack(spacing: 0) { page(dark: false); page(dark: true) }
+        }
+    }
+
+    private func page(dark: Bool) -> some View {
+        let paper = dark ? Color(white: 0.08) : Color(red: 0.95, green: 0.95, blue: 0.94)
+        let line = dark ? Color(white: 0.30) : Color(white: 0.78)
+        let ink = dark ? Color(white: 0.88) : Color(white: 0.10)
+        return VStack(alignment: .leading, spacing: 6) {
+            Rectangle().fill(ink).frame(width: 34, height: 5)
+            Rectangle().fill(line).frame(height: 1)
+            HStack(spacing: 4) {
+                Rectangle().fill(Color(red: 0.93, green: 0.82, blue: 0.22)).frame(width: 22, height: 14)
+                Rectangle().fill(line).frame(height: 1)
+            }
+            Rectangle().fill(line).frame(height: 1)
+            Rectangle().fill(line).frame(width: 40, height: 1)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(paper)
     }
 }

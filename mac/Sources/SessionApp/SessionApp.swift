@@ -5,6 +5,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // 演示截图用环境变量指定外观，不读用户设置。
+        if DemoData.appearance == nil { AppearanceMode.current.apply() }
         NSApp.activate(ignoringOtherApps: true)
         // 启动时的残留标签页还原由 AppModel.init 负责（它知道是否恢复了进行中的 session）。
     }

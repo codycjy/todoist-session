@@ -28,9 +28,11 @@ public final class APIClient: @unchecked Sendable {
         return r.tasks
     }
 
-    public func syncProjects() async throws -> [Category] {
+    /// 只同步给定的 Todoist 项目（今日任务涉及的那些），返回全部未归档分类。
+    public func syncProjects(ids: [String]) async throws -> [Category] {
         struct R: Decodable { let categories: [Category] }
-        return (try await send("GET", "/todoist/projects") as R).categories
+        let query = [URLQueryItem(name: "ids", value: ids.joined(separator: ","))]
+        return (try await send("GET", "/todoist/projects", query: query) as R).categories
     }
 
     public func categories() async throws -> [Category] {

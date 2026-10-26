@@ -15,7 +15,7 @@ export interface TodoistRouteDeps {
   now: () => number
 }
 
-const QUERIES: Record<string, string> = { today: 'today | overdue', overdue: 'overdue' }
+const QUERIES: Record<string, string> = { today: 'today', overdue: 'overdue' }
 
 export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps) {
   const r = new Hono<AppEnv>()
@@ -54,8 +54,12 @@ export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps
     const gateway = gatewayFor(user.todoistTokenEnc)
     if (gateway === UNREADABLE) return c.json({ error: 'TODOIST_TOKEN_UNREADABLE' }, 409)
     if (!gateway) return c.json({ error: 'TODOIST_NOT_CONFIGURED' }, 409)
+    // ids=a,b：只同步这些项目（客户端传今日任务涉及的项目），不做归档判断。
+    const idsParam = c.req.query('ids')
+    const only = idsParam === undefined ? null : new Set(idsParam.split(',').filter(Boolean))
     try {
-      const projects = await gateway.projects()
+      const projects = only === null ? await gateway.projects()
+        : only.size === 0 ? [] : (await gateway.projects()).filter((p) => only.has(p.id))
       db.transaction((tx) => {
         for (const p of projects) {
           tx.insert(categories)
@@ -66,7 +70,7 @@ export function todoistRoutes({ db, makeGateway, secret, now }: TodoistRouteDeps
             })
             .run()
         }
-        if (projects.length > 0) {
+        if (only === null && projects.length > 0) {
           const live = new Set(projects.map((p) => p.id))
           const known = tx
             .select()

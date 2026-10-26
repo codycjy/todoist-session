@@ -8,8 +8,9 @@ struct FocusTimelineView: View {
     let sessions: [SessionRecord]
     let tasks: [TodoistTask]
     var selectedTaskId: String?
+    var selectedSessionId: String?
     var onSelectTask: (TodoistTask) -> Void = { _ in }
-    @State private var selected: String?
+    var onSelectSession: (SessionRecord) -> Void = { _ in }
 
     private let pointsPerMinute = 1.6
     private let gutter: CGFloat = 46
@@ -133,7 +134,8 @@ struct FocusTimelineView: View {
 
     private func blockView(_ session: SessionRecord, _ block: TimelineBlock) -> some View {
         let color = model.category(for: session.categoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint
-        return Button { selected = session.id } label: {
+        let isSelected = session.id == selectedSessionId
+        return Button { onSelectSession(session) } label: {
             HStack(alignment: .top, spacing: 0) {
                 Rectangle().fill(color).frame(width: 3)
                 VStack(alignment: .leading, spacing: 1) {
@@ -145,7 +147,7 @@ struct FocusTimelineView: View {
                         }
                     }
                     if block.height >= 38 {
-                        Text("\(Ink.hm(session.startedAt)) · \(session.actualSeconds / 60)m").font(.inkMono(9.5)).opacity(0.7)
+                        Text("\(Ink.hm(session.startedAt)) · \(Ink.minutes(session.actualSeconds))").font(.inkMono(9.5)).opacity(0.7)
                     }
                 }
                 .padding(.horizontal, 5).padding(.vertical, block.height >= Self.compactHeight ? 3 : 0)
@@ -153,17 +155,11 @@ struct FocusTimelineView: View {
             .frame(maxWidth: .infinity, minHeight: block.height, maxHeight: block.height, alignment: .topLeading)
             .foregroundStyle(Ink.onHighlight)
             .background(Ink.highlight)
+            .overlay { if isSelected { Rectangle().strokeBorder(Ink.ink, lineWidth: 1.5) } }
             .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(.plain)
-        .help("\(session.title) · \(session.actualSeconds / 60) 分钟")
-        .popover(isPresented: Binding(get: { selected == session.id },
-                                      set: { if !$0 { selected = nil } })) {
-            SessionDetail(session: session, spans: model.spans(for: session.id),
-                          evaluation: model.evaluations[session.id]) {
-                Task { await model.retryEvaluation(sessionId: session.id) }
-            }
-        }
+        .help("\(session.title) · \(Ink.duration(session.actualSeconds))")
     }
 
     @ViewBuilder private func badge(_ session: SessionRecord) -> some View {
@@ -176,74 +172,6 @@ struct FocusTimelineView: View {
                 .foregroundStyle(Ink.highlight).background(Ink.onHighlight)
                 .help("专注度评分").accessibilityLabel("专注度 \(badge)")
         }
-    }
-}
-
-private struct SessionDetail: View {
-    let session: SessionRecord
-    let spans: [ActivitySpan]
-    let evaluation: Evaluation?
-    let onRetry: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(session.title).font(.system(size: 14, weight: .semibold))
-            Text("\(session.startedAt, format: .dateTime.hour().minute())–\(session.endedAt, format: .dateTime.hour().minute())　实际 \(session.actualSeconds / 60) 分钟")
-                .font(.inkMono(11)).foregroundStyle(Ink.sub)
-            Divider()
-            if let evaluation { evaluationView(evaluation) }
-            if spans.isEmpty {
-                Text("没有采集到活动（可能未授权辅助功能）").font(.inkMono(11)).foregroundStyle(Ink.sub)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(spans) { span in
-                            Text(line(span)).font(.caption).monospacedDigit().lineLimit(2)
-                                .foregroundStyle(span.wasBlocked ? Ink.now : span.kind == .idle ? Ink.sub : Ink.ink)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 220)
-            }
-        }
-        .padding(12)
-        .frame(width: 320)
-    }
-
-    @ViewBuilder private func evaluationView(_ evaluation: Evaluation) -> some View {
-        switch evaluation.status {
-        case .pending:
-            Text("评估中…").font(.inkMono(11)).foregroundStyle(Ink.sub)
-        case .failed:
-            HStack {
-                Text("评估失败").font(.inkMono(11)).foregroundStyle(Ink.sub)
-                Spacer()
-                Button("重新评估", action: onRetry).controlSize(.small)
-            }
-        case .done:
-            if let summary = evaluation.summary { Text(summary).font(.callout) }
-            if !evaluation.distractions.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("偏离片段").font(.caption.bold())
-                    ForEach(Array(evaluation.distractions.enumerated()), id: \.offset) { _, d in
-                        let f = Date.FormatStyle().hour().minute()
-                        Text("\(d.start.formatted(f))–\(d.end.formatted(f))  \(d.reason)")
-                            .font(.caption).monospacedDigit()
-                    }
-                }
-            }
-        }
-        Divider()
-    }
-
-    private func line(_ span: ActivitySpan) -> String {
-        let f = Date.FormatStyle().hour().minute()
-        let range = "\(span.startedAt.formatted(f))–\(span.endedAt.formatted(f))"
-        if span.kind == .idle { return "\(range)  闲置" }
-        let detail = [span.windowTitle, span.urlHost].compactMap { $0 }.first
-        let what = [span.appName ?? "未知", detail].compactMap { $0 }.joined(separator: " — ")
-        return "\(range)  \(what)\(span.wasBlocked ? "（已拦截）" : "")"
     }
 }
 

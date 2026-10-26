@@ -13,13 +13,13 @@ function gatewayWith(overrides: Partial<TodoistGateway> = {}): TodoistGateway {
   }
 }
 
-it('returns tasks; filter=today also includes overdue', async () => {
+it('returns tasks; filter=today queries today only', async () => {
   const gateway = gatewayWith()
   const { app } = makeTestApp({ gateway })
   const res = await app.request('/todoist/tasks?filter=today', { headers: authHeader })
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ tasks: [task] })
-  expect(gateway.tasks).toHaveBeenCalledWith('today | overdue')
+  expect(gateway.tasks).toHaveBeenCalledWith('today')
 })
 
 it('filter=overdue queries overdue only', async () => {
@@ -143,4 +143,26 @@ it('never archives custom categories and ignores an empty project list', async (
   projects = []
   const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
   expect(res.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Work', '阅读'])
+})
+
+it('projects?ids= syncs only the listed projects and archives nothing', async () => {
+  const projects = [
+    { id: 'p1', name: 'Work', color: 'blue' },
+    { id: 'p2', name: 'Home', color: 'red' },
+    { id: 'p3', name: 'Someday', color: 'grey' },
+  ]
+  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
+  const first = await (await app.request('/todoist/projects?ids=p1', { headers: authHeader })).json()
+  expect(first.categories.map((c: { name: string }) => c.name)).toEqual(['Work'])
+
+  const second = await (await app.request('/todoist/projects?ids=p2,p9', { headers: authHeader })).json()
+  expect(second.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Home', 'Work'])
+})
+
+it('projects?ids= with an empty list touches nothing', async () => {
+  const gateway = gatewayWith()
+  const { app } = makeTestApp({ gateway })
+  const res = await (await app.request('/todoist/projects?ids=', { headers: authHeader })).json()
+  expect(res.categories).toEqual([])
+  expect(gateway.projects).not.toHaveBeenCalled()
 })

@@ -36,6 +36,13 @@ enum Ink {
         return f.string(from: date)
     }
 
+    /// 「42 秒」「25 分钟」「1 小时 5 分」：不满一分钟时不显示成 0 分钟。
+    static func duration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(max(seconds, 0)) 秒" }
+        let m = seconds / 60
+        return m < 60 ? "\(m) 分钟" : "\(m / 60) 小时 \(m % 60) 分"
+    }
+
     static func minutes(_ seconds: Int) -> String {
         let m = seconds / 60
         return m >= 60 ? "\(m / 60)h \(m % 60)m" : "\(m)m"
@@ -178,4 +185,32 @@ struct HoverRow: ViewModifier {
 
 extension View {
     func hoverRow(selected: Bool = false) -> some View { modifier(HoverRow(selected: selected)) }
+}
+
+/// 外观：跟随系统 / 浅色 / 深色。写 `NSApp.appearance`，主窗口和菜单栏面板一起切换。
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let key = "appearance"
+    var id: String { rawValue }
+    var label: String {
+        switch self { case .system: "跟随系统"; case .light: "浅色"; case .dark: "深色" }
+    }
+    var icon: String {
+        switch self { case .system: "circle.lefthalf.filled"; case .light: "sun.max"; case .dark: "moon" }
+    }
+    var next: AppearanceMode {
+        switch self { case .system: .light; case .light: .dark; case .dark: .system }
+    }
+
+    static var current: AppearanceMode {
+        AppearanceMode(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .system
+    }
+
+    @MainActor func apply() {
+        switch self {
+        case .system: NSApp.appearance = nil
+        case .light: NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
 }

@@ -74,6 +74,18 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(cats.first?.archived, true)
     }
 
+    func testSyncProjectsSendsOnlyGivenIds() async throws {
+        var captured: URLRequest?
+        StubURLProtocol.handler = { req in
+            captured = req
+            return (200, Data(#"{"categories":[]}"#.utf8))
+        }
+        _ = try await makeClient().syncProjects(ids: ["p1", "p2"])
+        XCTAssertEqual(captured?.url?.path, "/todoist/projects")
+        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "ids", value: "p1,p2")])
+    }
+
     func testTasksDecodesAndSendsBearerToken() async throws {
         var captured: URLRequest?
         StubURLProtocol.handler = { req in

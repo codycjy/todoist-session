@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// 主窗口：左侧栏（今日 / 统计、项目筛选、设置子页）+ 右侧内容。首次启动弹出一次权限引导。
+/// 主窗口：左侧栏（今日 / 统计、设置子页）+ 右侧内容。首次启动弹出一次权限引导。
 enum Route: Hashable {
     case today, stats
-    case project(String)            // Todoist 项目 ID：今日页只看这个项目的任务
     case settings(SettingsSection)
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case timing = "计时", blocking = "黑名单", backend = "后端", permissions = "权限"
+    case timing = "计时", blocking = "黑名单", appearance = "外观", backend = "后端", permissions = "权限"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .timing: "timer"
         case .blocking: "nosign"
+        case .appearance: "circle.lefthalf.filled"
         case .backend: "server.rack"
         case .permissions: "lock.shield"
         }
@@ -28,17 +28,12 @@ struct MainView: View {
         case "stats": .stats
         case "settings": .settings(.timing)
         case "blocking": .settings(.blocking)
+        case "appearance": .settings(.appearance)
         default: .today
         }
     }()
 
-    private var projectFilter: String? {
-        if case .project(let id) = route { return id }
-        return nil
-    }
-    private var showsToday: Bool {
-        switch route { case .today, .project: true; default: false }
-    }
+    private var showsToday: Bool { route == .today }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -46,8 +41,12 @@ struct MainView: View {
                 .frame(width: 200)
             Rectangle().fill(Ink.rule).frame(width: 1)
             ZStack {
+                if DemoData.initialTab == "menu" {
+                    // 仅演示截图：把菜单栏面板放进主窗口渲染。
+                    Ink.shelf.overlay(alignment: .top) { MenuPanel().inkPanel(padding: 0).padding(.top, 60) }.zIndex(1)
+                }
                 // 今日页常驻（保留输入草稿与选中的任务），其余按需创建。
-                TodayView(projectFilter: projectFilter)
+                TodayView()
                     .opacity(showsToday ? 1 : 0).allowsHitTesting(showsToday)
                 switch route {
                 case .stats: StatsView()
@@ -68,6 +67,11 @@ struct MainView: View {
 private struct Sidebar: View {
     @EnvironmentObject var model: AppModel
     @Binding var route: Route
+    @AppStorage(AppearanceMode.key) private var appearanceRaw = AppearanceMode.system.rawValue
+    private var appearance: AppearanceMode {
+        get { AppearanceMode(rawValue: appearanceRaw) ?? .system }
+        nonmutating set { appearanceRaw = newValue.rawValue; newValue.apply() }
+    }
 
     private var todayMinutes: Int { model.todaySessions.map(\.actualSeconds).reduce(0, +) }
     private var avgScore: Int? {
@@ -86,16 +90,8 @@ private struct Sidebar: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     group(nil) {
-                        item("今日", icon: "sun.max", route: .today)
+                        item("今日", icon: "square.and.pencil", route: .today, count: model.tasks.count)
                         item("统计", icon: "chart.bar", route: .stats)
-                    }
-                    if !model.categories.isEmpty {
-                        group("项目") {
-                            ForEach(model.categories.filter { $0.todoistProjectId != nil }) { c in
-                                item(c.name, mark: Color(todoistColor: c.color), route: .project(c.todoistProjectId!),
-                                     count: model.tasks.filter { $0.projectId == c.todoistProjectId }.count)
-                            }
-                        }
                     }
                     group("设置") {
                         ForEach(SettingsSection.allCases) { s in item(s.rawValue, icon: s.icon, route: .settings(s)) }
@@ -120,15 +116,11 @@ private struct Sidebar: View {
         }
     }
 
-    private func item(_ title: String, icon: String? = nil, mark: Color? = nil, route r: Route, count: Int? = nil) -> some View {
+    private func item(_ title: String, icon: String, route r: Route, count: Int? = nil) -> some View {
         let selected = route == r
         return Button { route = r } label: {
             HStack(spacing: 9) {
-                Group {
-                    if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)) }
-                    else if let mark { CategoryMark(color: mark, size: 8) }
-                }
-                .frame(width: 16)
+                Image(systemName: icon).font(.system(size: 12, weight: .medium)).frame(width: 16)
                 Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
                 Spacer(minLength: 4)
                 if let count, count > 0 { Text("\(count)").font(.inkMono(11)).foregroundStyle(selected ? Ink.paper.opacity(0.7) : Ink.faint) }
@@ -158,6 +150,10 @@ private struct Sidebar: View {
                 Text(model.unsynced > 0 ? "\(model.unsynced) 条未同步" : (model.api == nil ? "离线" : "已同步"))
                     .font(.inkMono(10)).foregroundStyle(Ink.sub)
                 Spacer()
+                Button {
+                    appearance = appearance.next
+                } label: { Image(systemName: appearance.icon).font(.system(size: 11)) }
+                .buttonStyle(.plain).foregroundStyle(Ink.sub).help("外观：\(appearance.label)（点击切换）")
                 Button { Task { await model.refresh(); await model.refreshEvaluations() } } label: {
                     Image(systemName: "arrow.clockwise").font(.system(size: 11))
                 }
