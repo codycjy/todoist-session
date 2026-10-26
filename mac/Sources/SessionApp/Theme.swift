@@ -43,6 +43,9 @@ enum Ink {
         return m < 60 ? "\(m) 分钟" : "\(m / 60) 小时 \(m % 60) 分"
     }
 
+    /// 时长小标签：「25m」；不满一分钟（开发用 SESSION_FOCUS_SECONDS）显示「15s」，不会出现「0m」。
+    static func chip(_ seconds: Int) -> String { seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m" }
+
     static func minutes(_ seconds: Int) -> String {
         let m = seconds / 60
         return m >= 60 ? "\(m / 60)h \(m % 60)m" : "\(m)m"

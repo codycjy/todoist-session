@@ -6,19 +6,20 @@ struct TaskDetailPanel: View {
     let task: TodoistTask
     let category: Category?
     let canStart: Bool
-    let defaultMinutes: Int
+    /// 分类 profile / 全局默认时长（秒）。
+    let defaultSeconds: Int
     /// 参数是选定的专注秒数。
     let onStart: (Int) -> Void
     let onClose: () -> Void
 
-    @State private var minutes: Int?
+    @State private var seconds: Int?
 
+    private var taskSeconds: Int? { task.durationMinutes.flatMap { $0 > 0 ? $0 * 60 : nil } }
+    /// 可选时长（秒）：常用四档 + 默认值 + 任务自己的时长。
     private var options: [Int] {
-        var o = [15, 25, 45, 60, defaultMinutes]
-        if let d = task.durationMinutes, d > 0 { o.append(d) }
-        return Array(Set(o)).sorted()
+        Array(Set([15, 25, 45, 60].map { $0 * 60 } + [defaultSeconds] + (taskSeconds.map { [$0] } ?? []))).sorted()
     }
-    private var chosen: Int { minutes ?? (task.durationMinutes.flatMap { $0 > 0 ? $0 : nil } ?? defaultMinutes) }
+    private var chosen: Int { seconds ?? taskSeconds ?? defaultSeconds }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -77,18 +78,18 @@ struct TaskDetailPanel: View {
 
             Rectangle().fill(Ink.rule).frame(height: 1)
             HStack(spacing: 6) {
-                ForEach(options, id: \.self) { m in InkChip(text: "\(m)m", selected: m == chosen) { minutes = m } }
+                ForEach(options, id: \.self) { s in InkChip(text: Ink.chip(s), selected: s == chosen) { seconds = s } }
                 Spacer(minLength: 8)
                 if !canStart { Text("专注进行中").font(.inkMono(10)).foregroundStyle(Ink.sub) }
-                Button { onStart(chosen * 60) } label: {
-                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.system(size: 10)); Text("开始专注 \(chosen) 分钟") }
+                Button { onStart(chosen) } label: {
+                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.system(size: 10)); Text("开始专注 \(Ink.duration(chosen))") }
                 }
                 .buttonStyle(.inkPrimary).disabled(!canStart)
             }
         }
         .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .onChange(of: task.id) { _, _ in minutes = nil }
+        .onChange(of: task.id) { _, _ in seconds = nil }
     }
 
     private var description: some View {

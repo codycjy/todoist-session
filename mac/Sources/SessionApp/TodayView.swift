@@ -7,7 +7,8 @@ struct TodayView: View {
 
     @State private var title = ""
     @State private var categoryId: String?
-    @State private var minutes: Int?
+    /// 手动选的时长（秒）；nil 表示用分类 profile / 全局默认。
+    @State private var seconds: Int?
     @State private var selectedTaskId: String? = DemoData.selectedTaskId
     /// 时间轴上点开的专注块；与选中任务互斥，底部同一时间只有一个详情面板。
     @State private var selectedSessionId: String? = DemoData.selectedSessionId
@@ -17,7 +18,7 @@ struct TodayView: View {
     private var idle: Bool { model.engine.phase == .idle }
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// 没手动选时长时用所选分类 profile 的时长（没有 profile 就是全局默认）。
-    private var effectiveMinutes: Int { minutes ?? model.focusSeconds(for: categoryId) / 60 }
+    private var effectiveSeconds: Int { seconds ?? model.focusSeconds(for: categoryId) }
     private var selectedTask: TodoistTask? { model.tasks.first { $0.id == selectedTaskId } }
     private var selectedSession: SessionRecord? { model.todaySessions.first { $0.id == selectedSessionId } }
     private var hasPanel: Bool { selectedTask != nil || selectedSession != nil }
@@ -87,7 +88,7 @@ struct TodayView: View {
             }
             if let task = selectedTask {
                 TaskDetailPanel(task: task, category: category(of: task), canStart: idle,
-                                defaultMinutes: model.focusSeconds(for: model.categoryId(for: task)) / 60,
+                                defaultSeconds: model.focusSeconds(for: model.categoryId(for: task)),
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
                                 onClose: { select(task: nil) })
                     .padding(.horizontal, 32).padding(.bottom, 20)
@@ -124,8 +125,8 @@ struct TodayView: View {
                 .onSubmit(start)
             HStack(spacing: 6) {
                 Menu {
-                    Button("无分类") { categoryId = nil; minutes = nil }
-                    ForEach(model.categories) { c in Button(c.name) { categoryId = c.id; minutes = nil } }
+                    Button("无分类") { categoryId = nil; seconds = nil }
+                    ForEach(model.categories) { c in Button(c.name) { categoryId = c.id; seconds = nil } }
                 } label: {
                     HStack(spacing: 5) {
                         CategoryMark(color: model.category(for: categoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
@@ -138,8 +139,8 @@ struct TodayView: View {
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                 Rectangle().fill(Ink.rule).frame(width: 1, height: 16).padding(.horizontal, 4)
-                ForEach(durationOptions, id: \.self) { m in
-                    InkChip(text: "\(m)m", selected: m == effectiveMinutes) { minutes = m }
+                ForEach(durationOptions, id: \.self) { s in
+                    InkChip(text: Ink.chip(s), selected: s == effectiveSeconds) { seconds = s }
                 }
                 Spacer(minLength: 8)
                 Button(action: start) {
@@ -155,7 +156,7 @@ struct TodayView: View {
                         Text("常用").font(.inkMono(10, weight: .semibold)).tracking(1).foregroundStyle(Ink.faint)
                         ForEach(model.entries) { e in
                             InkChip(text: e.title, mark: model.category(for: e.categoryId).map { Color(todoistColor: $0.color) }) {
-                                title = e.title; categoryId = e.categoryId; minutes = nil; composerFocused = true
+                                title = e.title; categoryId = e.categoryId; seconds = nil; composerFocused = true
                             }
                         }
                     }
@@ -165,16 +166,14 @@ struct TodayView: View {
         .inkPanel(padding: 18)
     }
 
+    /// 可选时长（秒）：常用四档 + 当前默认值。
     private var durationOptions: [Int] {
-        var opts = [15, 25, 45, 60]
-        let d = model.focusSeconds(for: categoryId) / 60
-        if !opts.contains(d) { opts.append(d); opts.sort() }
-        return opts
+        Array(Set([15, 25, 45, 60].map { $0 * 60 } + [model.focusSeconds(for: categoryId)])).sorted()
     }
 
     private func start() {
         guard idle, !trimmedTitle.isEmpty else { return }
-        model.startCustom(title: trimmedTitle, categoryId: categoryId, seconds: effectiveMinutes * 60)
+        model.startCustom(title: trimmedTitle, categoryId: categoryId, seconds: effectiveSeconds)
         title = ""
     }
 
