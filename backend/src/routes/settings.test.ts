@@ -4,7 +4,7 @@ import { hashToken } from '../crypto.js'
 import { users } from '../db/schema.js'
 import { authHeader, makeTestApp } from '../testing.js'
 
-const DEFAULTS = { focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [] }
+const DEFAULTS = { focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [], profiles: {} }
 const get = (app: ReturnType<typeof makeTestApp>['app']) => app.request('/settings', { headers: authHeader })
 const put = (app: ReturnType<typeof makeTestApp>['app'], body: unknown) =>
   app.request('/settings', { method: 'PUT', headers: { ...authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -98,4 +98,18 @@ it('falls back to defaults for stored values that no longer validate', async () 
   const { app, db } = makeTestApp()
   db.update(users).set({ settings: { focusSeconds: 'bad', blockApps: 7 } }).run()
   expect(await (await get(app)).json()).toEqual(DEFAULTS)
+})
+
+it('stores category profiles and normalises their block lists', async () => {
+  const { app } = makeTestApp()
+  const coding = { focusSeconds: 3000, breakSeconds: 600, inheritBlocklist: false, blockApps: ['a', 'a'], blockDomains: [' X.com '] }
+  const res = await (await put(app, { profiles: { c1: coding } })).json()
+  expect(res.profiles).toEqual({ c1: { ...coding, blockApps: ['a'], blockDomains: ['x.com'] } })
+  expect((await (await get(app)).json()).profiles.c1.focusSeconds).toBe(3000)
+})
+
+it('rejects an invalid profile', async () => {
+  const { app } = makeTestApp()
+  const bad = { focusSeconds: 10, breakSeconds: 600, inheritBlocklist: true, blockApps: [], blockDomains: [] }
+  expect((await put(app, { profiles: { c1: bad } })).status).toBe(400)
 })

@@ -1,5 +1,41 @@
 import Foundation
 
+/// 分类专属的计时与黑名单。黑名单可继承全局名单再追加自己的条目。
+public struct CategoryProfile: Codable, Equatable, Sendable {
+    public static let breakRange = 60...3600
+
+    public var focusSeconds: Int
+    public var breakSeconds: Int
+    public var inheritBlocklist: Bool
+    public var blockApps: [String]
+    public var blockDomains: [String]
+
+    public init(focusSeconds: Int, breakSeconds: Int, inheritBlocklist: Bool = true,
+                blockApps: [String] = [], blockDomains: [String] = []) {
+        self.focusSeconds = focusSeconds; self.breakSeconds = breakSeconds; self.inheritBlocklist = inheritBlocklist
+        self.blockApps = blockApps; self.blockDomains = blockDomains
+    }
+
+    func normalized() -> CategoryProfile {
+        CategoryProfile(focusSeconds: clamp(focusSeconds, AppSettings.focusRange),
+                        breakSeconds: clamp(breakSeconds, Self.breakRange),
+                        inheritBlocklist: inheritBlocklist,
+                        blockApps: dedupe(blockApps, lowercase: false), blockDomains: dedupe(blockDomains, lowercase: true))
+    }
+}
+
+private func clamp(_ v: Int, _ r: ClosedRange<Int>) -> Int { min(max(v, r.lowerBound), r.upperBound) }
+
+/// App 去空白去重，域名另转小写。保持首次出现的顺序。
+private func dedupe(_ items: [String], lowercase: Bool) -> [String] {
+    var seen = Set<String>()
+    return items.compactMap { raw in
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lowercase { s = s.lowercased() }
+        return s.isEmpty || !seen.insert(s).inserted ? nil : s
+    }
+}
+
 /// 用户可调设置（与后端 `/settings` 同形）。
 public struct AppSettings: Equatable, Sendable {
     public static let focusRange = 60...7200
@@ -9,43 +45,59 @@ public struct AppSettings: Equatable, Sendable {
     public var idleThresholdSeconds: Int
     public var blockApps: [String]
     public var blockDomains: [String]
+    /// categoryId → 分类 profile；没有 profile 的分类用全局设置。
+    public var profiles: [String: CategoryProfile]
 
     public static let defaults = AppSettings(focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [])
+    /// 没有 profile 时的休息时长。
+    public static let shortBreakSeconds = 300, longBreakSeconds = 900
 
-    public init(focusSeconds: Int, idleThresholdSeconds: Int, blockApps: [String], blockDomains: [String]) {
+    public init(focusSeconds: Int, idleThresholdSeconds: Int, blockApps: [String], blockDomains: [String],
+                profiles: [String: CategoryProfile] = [:]) {
         self.focusSeconds = focusSeconds; self.idleThresholdSeconds = idleThresholdSeconds
-        self.blockApps = blockApps; self.blockDomains = blockDomains
+        self.blockApps = blockApps; self.blockDomains = blockDomains; self.profiles = profiles
     }
 
     /// 范围钳制；App 去空白去重，域名另转小写。保持首次出现的顺序。
     public func normalized() -> AppSettings {
-        func dedupe(_ items: [String], lowercase: Bool) -> [String] {
-            var seen = Set<String>()
-            return items.compactMap { raw in
-                var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                if lowercase { s = s.lowercased() }
-                return s.isEmpty || !seen.insert(s).inserted ? nil : s
-            }
-        }
-        return AppSettings(
-            focusSeconds: min(max(focusSeconds, Self.focusRange.lowerBound), Self.focusRange.upperBound),
-            idleThresholdSeconds: min(max(idleThresholdSeconds, Self.idleRange.lowerBound), Self.idleRange.upperBound),
+        AppSettings(
+            focusSeconds: clamp(focusSeconds, Self.focusRange),
+            idleThresholdSeconds: clamp(idleThresholdSeconds, Self.idleRange),
             blockApps: dedupe(blockApps, lowercase: false),
-            blockDomains: dedupe(blockDomains, lowercase: true))
+            blockDomains: dedupe(blockDomains, lowercase: true),
+            profiles: profiles.mapValues { $0.normalized() })
+    }
+
+    public func profile(for categoryId: String?) -> CategoryProfile? { categoryId.flatMap { profiles[$0] } }
+
+    /// 该分类的默认专注时长：有 profile 用 profile，否则用全局。
+    public func focusSeconds(for categoryId: String?) -> Int { profile(for: categoryId)?.focusSeconds ?? focusSeconds }
+
+    /// 该分类专注结束后的休息时长：有 profile 时长短休都用 profile 的休息时长。
+    public func breakSeconds(for categoryId: String?, kind: BreakKind) -> Int {
+        profile(for: categoryId)?.breakSeconds ?? (kind == .long ? Self.longBreakSeconds : Self.shortBreakSeconds)
+    }
+
+    /// 该分类专注时生效的黑名单：继承时 = 全局 ∪ 专属，否则只有专属。
+    public func blocklist(for categoryId: String?) -> BlockList {
+        guard let p = profile(for: categoryId) else { return BlockList(apps: Set(blockApps), domains: Set(blockDomains)) }
+        let apps = Set(p.blockApps).union(p.inheritBlocklist ? Set(blockApps) : [])
+        let domains = Set(p.blockDomains).union(p.inheritBlocklist ? Set(blockDomains) : [])
+        return BlockList(apps: apps, domains: domains)
     }
 
     init(_ r: RemoteSettings) {
         self.init(focusSeconds: r.focusSeconds, idleThresholdSeconds: r.idleThresholdSeconds,
-                  blockApps: r.blockApps, blockDomains: r.blockDomains)
+                  blockApps: r.blockApps, blockDomains: r.blockDomains, profiles: r.profiles)
     }
 
     var patch: SettingsPatch {
         SettingsPatch(focusSeconds: focusSeconds, idleThresholdSeconds: idleThresholdSeconds,
-                      blockApps: blockApps, blockDomains: blockDomains)
+                      blockApps: blockApps, blockDomains: blockDomains, profiles: profiles)
     }
 }
 
-public enum SettingsField: Sendable { case focusSeconds, idleThresholdSeconds, blockApps, blockDomains }
+public enum SettingsField: Sendable { case focusSeconds, idleThresholdSeconds, blockApps, blockDomains, profiles }
 
 public protocol SettingsRemote: Sendable {
     func fetchSettings() async throws -> RemoteSettings
@@ -104,6 +156,7 @@ public final class SettingsStore: ObservableObject {
     private enum Key {
         static let focus = "settings.focusSeconds", idle = "settings.idleThresholdSeconds"
         static let apps = "settings.blockApps", domains = "settings.blockDomains", dirty = "settings.dirty"
+        static let profiles = "settings.profiles"
     }
 
     public init(defaults: UserDefaults, env: [String: String], scheduler: SettingsScheduling = DispatchSettingsScheduler(),
@@ -126,7 +179,9 @@ public final class SettingsStore: ObservableObject {
             focusSeconds: defaults.object(forKey: Key.focus) as? Int ?? d.focusSeconds,
             idleThresholdSeconds: defaults.object(forKey: Key.idle) as? Int ?? d.idleThresholdSeconds,
             blockApps: defaults.stringArray(forKey: Key.apps) ?? d.blockApps,
-            blockDomains: defaults.stringArray(forKey: Key.domains) ?? d.blockDomains).normalized()
+            blockDomains: defaults.stringArray(forKey: Key.domains) ?? d.blockDomains,
+            profiles: defaults.data(forKey: Key.profiles)
+                .flatMap { try? JSONDecoder().decode([String: CategoryProfile].self, from: $0) } ?? [:]).normalized()
     }
 
     private static func apply(env: [SettingsField: Any], to base: AppSettings) -> AppSettings {
@@ -169,6 +224,7 @@ public final class SettingsStore: ObservableObject {
         defaults.set(s.idleThresholdSeconds, forKey: Key.idle)
         defaults.set(s.blockApps, forKey: Key.apps)
         defaults.set(s.blockDomains, forKey: Key.domains)
+        defaults.set(try? JSONEncoder().encode(s.profiles), forKey: Key.profiles)
     }
 
     // MARK: 同步

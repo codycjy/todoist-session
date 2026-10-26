@@ -66,6 +66,9 @@ public final class ActivityTracker {
                               urlHost: nil, startedAt: last, endedAt: end, wasBlocked: false)])
     }
 
+    /// 专注时长被加减后更新结束时间（拦截页显示的剩余时间用它）。
+    public func updateEnd(_ end: Date) { endAt = end }
+
     /// 正常结束：在 endedAt 处关闭最后一个 span 并落盘。
     public func stop(at end: Date) {
         guard var b = builder else { return }

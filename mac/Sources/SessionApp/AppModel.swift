@@ -37,8 +37,14 @@ final class AppModel: ObservableObject {
     private var askedAccessibility = false
     private var evaluationPoll: Task<Void, Never>?
 
-    /// 专注时长：开始时读取当前生效设置（环境变量 > 设置页 > 默认 25 分钟），进行中的 session 不受影响。
-    private var focusSeconds: Int { settings.effective.focusSeconds }
+    /// 最近一次完成的专注所属分类：休息时长按它的 profile 取。
+    private var lastCompletedCategoryId: String?
+
+    /// 某分类的默认专注时长：环境变量覆盖（开发用）> 分类 profile > 全局设置。进行中的 session 不受影响。
+    func focusSeconds(for categoryId: String?) -> Int {
+        let s = settings.effective
+        return settings.overridden.contains(.focusSeconds) ? s.focusSeconds : s.focusSeconds(for: categoryId)
+    }
 
     init() {
         let env = ProcessInfo.processInfo.environment
@@ -49,6 +55,9 @@ final class AppModel: ObservableObject {
             defaults.removePersistentDomain(forName: "session.demo")
             defaults.set(["com.tencent.xinWeChat", "com.hnc.Discord"], forKey: "settings.blockApps")
             defaults.set(["youtube.com", "bilibili.com", "x.com"], forKey: "settings.blockDomains")
+            let coding = ["c-work": CategoryProfile(focusSeconds: 3000, breakSeconds: 1500, inheritBlocklist: true,
+                                                    blockApps: ["com.apple.Music"], blockDomains: ["news.ycombinator.com"])]
+            defaults.set(try? JSONEncoder().encode(coding), forKey: "settings.profiles")
         }
         engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore(defaults: defaults))
         settings = SettingsStore(defaults: defaults, env: env)
@@ -59,7 +68,8 @@ final class AppModel: ObservableObject {
         let dbPath: String? = demo ? nil : (env["SESSION_DB_PATH"] ?? Self.defaultDBPath())
         store = try? LocalStore(path: dbPath)
         if store == nil { errorMessage = "无法打开本地数据库，专注记录不会保存" }
-        tracker = demo ? nil : Self.makeTracker(store: store, settings: settings.effective)
+        tracker = demo ? nil : Self.makeTracker(store: store, settings: settings.effective,
+                                                categoryId: engine.currentRunCategoryId)
         if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
 
         // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
@@ -133,8 +143,8 @@ final class AppModel: ObservableObject {
     }
 
     /// 黑名单与闲置阈值在 tracker 创建时固定，因此每个新 session 重建 tracker。
-    private static func makeTracker(store: LocalStore?, settings s: AppSettings) -> ActivityTracker? {
-        let blocklist = BlockList(apps: Set(s.blockApps), domains: Set(s.blockDomains))
+    private static func makeTracker(store: LocalStore?, settings s: AppSettings, categoryId: String?) -> ActivityTracker? {
+        let blocklist = s.blocklist(for: categoryId)
         Log.info("黑名单 apps=\(blocklist.apps.sorted()) domains=\(blocklist.domains.sorted())，闲置阈值=\(s.idleThresholdSeconds)s，辅助功能=\(Permissions.accessibilityGranted)")
         return store.map {
             ActivityTracker(sampler: MacActivitySampler(), enforcer: MacBlockEnforcer(), store: $0, clock: SystemClock(),
@@ -177,19 +187,24 @@ final class AppModel: ObservableObject {
 
     // MARK: 动作（只有显式点击/提交才会开始专注）
 
-    /// 设置里的默认专注时长（秒），开始面板用它预选时长。
-    var defaultFocusSeconds: Int { focusSeconds }
+    /// 全局默认专注时长（秒），未选分类时开始面板用它预选时长。
+    var defaultFocusSeconds: Int { focusSeconds(for: nil) }
 
-    /// `seconds` 为 nil 时用设置里的专注时长。
+    func categoryId(for task: TodoistTask) -> String? {
+        categories.first { $0.todoistProjectId == task.projectId }?.id
+    }
+
+    /// `seconds` 为 nil 时用分类 profile / 全局设置里的专注时长。
     func startTask(_ task: TodoistTask, seconds: Int? = nil) {
-        let categoryId = categories.first { $0.todoistProjectId == task.projectId }?.id
+        let categoryId = categoryId(for: task)
         begin(FocusSpec(title: task.content, categoryId: categoryId, source: .todoist,
-                        todoistTaskId: task.id, entryId: nil, plannedSeconds: seconds ?? focusSeconds))
+                        todoistTaskId: task.id, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId)))
     }
 
     func startEntry(_ entry: Entry, seconds: Int? = nil) {
         let started = begin(FocusSpec(title: entry.title, categoryId: entry.categoryId, source: .custom,
-                                      todoistTaskId: nil, entryId: entry.id, plannedSeconds: seconds ?? focusSeconds))
+                                      todoistTaskId: nil, entryId: entry.id,
+                                      plannedSeconds: seconds ?? focusSeconds(for: entry.categoryId)))
         if started { remember(title: entry.title, categoryId: entry.categoryId) }
     }
 
@@ -197,14 +212,35 @@ final class AppModel: ObservableObject {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let started = begin(FocusSpec(title: title, categoryId: categoryId, source: .custom,
-                                      todoistTaskId: nil, entryId: nil, plannedSeconds: seconds ?? focusSeconds))
+                                      todoistTaskId: nil, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId)))
         if started { remember(title: title, categoryId: categoryId) }
     }
 
     /// 放弃 = 丢弃：不写入本地 session，不计入统计，已采集的 span 一并删除。
     func abandon() {
+        let run = currentRun
         tracker?.discard(); stopSampling(); Browser.restoreAll()
         engine.abandon(); objectWillChange.send()
+        if let run { runShortcut(Shortcuts.endName, event: "abandon", run: run, actualSeconds: nil) }
+    }
+
+    /// 进行中的专注加减分钟。
+    func adjust(minutes: Int) {
+        guard engine.adjust(by: minutes * 60), let run = currentRun else { return }
+        tracker?.updateEnd(run.endAt)
+        objectWillChange.send()
+    }
+
+    /// 提前完成：按现在结束并照常记录；之后的休息时长不变。
+    func finishEarly() {
+        guard let done = engine.finishEarly() else { return }
+        complete(done, live: true, notify: false)
+    }
+
+    /// 下一次休息的时长（秒）：按刚完成专注的分类 profile，否则 5 / 15 分钟。
+    var suggestedBreakSeconds: Int {
+        settings.effective.breakSeconds(for: pendingCompletion?.run.categoryId ?? lastCompletedCategoryId,
+                                        kind: engine.suggestedBreak)
     }
 
     func spans(for sessionId: String) -> [ActivitySpan] { (try? store?.spans(sessionId: sessionId)) ?? [] }
@@ -212,7 +248,7 @@ final class AppModel: ObservableObject {
     func startBreak() {
         let kind = engine.suggestedBreak
         do {
-            try engine.startBreak(kind, seconds: kind == .long ? 15 * 60 : 5 * 60)
+            try engine.startBreak(kind, seconds: suggestedBreakSeconds)
             pendingCompletion = nil
         } catch {
             errorMessage = "已有进行中的专注或休息"
@@ -323,8 +359,9 @@ final class AppModel: ObservableObject {
             if case .focusing(let run) = engine.phase {
                 // 此时没有运行中的 tracker（engine.start 已确认空闲），按最新设置重建。
                 guard !DemoData.enabled else { return true }
-                tracker = Self.makeTracker(store: store, settings: settings.effective)
+                tracker = Self.makeTracker(store: store, settings: settings.effective, categoryId: run.categoryId)
                 tracker?.start(run: run); startSampling()
+                runShortcut(Shortcuts.startName, event: "start", run: run, actualSeconds: nil)
             }
             return true
         }
@@ -341,15 +378,25 @@ final class AppModel: ObservableObject {
     }
 
     /// `live`：false 表示启动时从持久化状态恢复的、已在 App 关闭期间结束的 session，不再弹通知。
-    private func complete(_ done: CompletedFocus, live: Bool) {
+    private func complete(_ done: CompletedFocus, live: Bool, notify: Bool = true) {
         tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
+        lastCompletedCategoryId = done.run.categoryId
+        if live { runShortcut(Shortcuts.endName, event: "complete", run: done.run, actualSeconds: done.actualSeconds) }
         do { try store?.save(SessionRecord(done)) }
         catch { errorMessage = "保存专注记录失败：\(error.localizedDescription)" }
         pendingCompletion = done
-        if live { Notifier.focusCompleted(title: done.run.title) }
+        if live && notify { Notifier.focusCompleted(title: done.run.title) }
         reloadToday()
         objectWillChange.send()
         Task { await flushSync() }
+    }
+
+    private func runShortcut(_ name: String, event: String, run: FocusRun, actualSeconds: Int?) {
+        var input: [String: Any] = ["event": event, "title": run.title,
+                                    "category": category(for: run.categoryId)?.name ?? "",
+                                    "plannedMinutes": run.plannedSeconds / 60]
+        if let actualSeconds { input["actualMinutes"] = actualSeconds / 60 }
+        Shortcuts.run(name, input: input)
     }
 
     private func startSampling() {

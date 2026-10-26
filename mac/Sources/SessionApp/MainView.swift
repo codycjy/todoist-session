@@ -7,11 +7,12 @@ enum Route: Hashable {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case timing = "计时", blocking = "黑名单", appearance = "外观", backend = "后端", permissions = "权限"
+    case timing = "计时", profiles = "分类", blocking = "黑名单", appearance = "外观", backend = "后端", permissions = "权限"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .timing: "timer"
+        case .profiles: "square.stack"
         case .blocking: "nosign"
         case .appearance: "circle.lefthalf.filled"
         case .backend: "server.rack"
@@ -28,6 +29,7 @@ struct MainView: View {
         case "stats": .stats
         case "settings": .settings(.timing)
         case "blocking": .settings(.blocking)
+        case "profiles": .settings(.profiles)
         case "appearance": .settings(.appearance)
         default: .today
         }

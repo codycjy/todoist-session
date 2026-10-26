@@ -214,4 +214,43 @@ final class TimerEngineTests: XCTestCase {
         engine.abandon()
         if case .breaking = engine.phase {} else { XCTFail("abandon must not end a break") }
     }
+
+    func testAdjustAddsAndSubtractsTime() throws {
+        let engine = makeEngine()
+        try engine.start(spec(seconds: 1500))
+        XCTAssertTrue(engine.adjust(by: 300))
+        XCTAssertEqual(engine.remainingSeconds, 1800)
+        XCTAssertTrue(engine.adjust(by: -300))
+        XCTAssertEqual(engine.remainingSeconds, 1500)
+        guard case .focusing(let run) = store.saved else { return XCTFail("adjusted run must be persisted") }
+        XCTAssertEqual(run.plannedSeconds, 1500)
+    }
+
+    func testAdjustNeverLeavesLessThanOneMinute() throws {
+        let engine = makeEngine()
+        try engine.start(spec(seconds: 600))
+        clock.advance(480)
+        engine.adjust(by: -300)
+        XCTAssertEqual(engine.remainingSeconds, 60)
+        XCTAssertFalse(engine.adjust(by: -300))
+    }
+
+    func testAdjustDoesNothingWhenIdle() {
+        XCTAssertFalse(makeEngine().adjust(by: 300))
+    }
+
+    func testFinishEarlyCompletesNowAndCountsTowardLongBreak() throws {
+        let engine = makeEngine()
+        var callbacks = 0
+        engine.onCompleted = { _ in callbacks += 1 }
+        try engine.start(spec(seconds: 1500))
+        clock.advance(600)
+        let done = try XCTUnwrap(engine.finishEarly())
+        XCTAssertEqual(done.actualSeconds, 600)
+        XCTAssertEqual(done.run.plannedSeconds, 1500)
+        XCTAssertEqual(engine.phase, .idle)
+        XCTAssertEqual(store.completedCount, 1)
+        XCTAssertEqual(callbacks, 0)
+        XCTAssertNil(engine.finishEarly())
+    }
 }

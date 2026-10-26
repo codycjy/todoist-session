@@ -52,7 +52,13 @@ struct MenuPanel: View {
             timerBlock(eyebrow: "专注中", title: run.title, categoryId: run.categoryId,
                        progress: 1 - Double(model.engine.remainingSeconds) / Double(max(run.plannedSeconds, 1)),
                        minutes: run.plannedSeconds / 60) {
-                Button("放弃（不记录）") { model.abandon() }.buttonStyle(InkButtonStyle(compact: true))
+                HStack(spacing: 6) {
+                    FocusAdjustButtons(compact: true)
+                    Button("提前完成") { model.finishEarly() }.buttonStyle(InkButtonStyle(kind: .primary, compact: true))
+                    Spacer()
+                    Button("放弃") { model.abandon() }.buttonStyle(.inkQuiet).foregroundStyle(Ink.sub)
+                        .help("放弃（不记录）")
+                }
             }
         case .breaking:
             timerBlock(eyebrow: "休息中", title: nil, categoryId: nil, progress: nil, minutes: 0) {

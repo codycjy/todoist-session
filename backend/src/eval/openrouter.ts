@@ -16,7 +16,7 @@ const EVAL_TOOL = {
       type: 'object',
       properties: {
         focus_score: { type: 'integer', minimum: 0, maximum: 100, description: '0 = entirely off-task, 100 = fully focused on the stated task' },
-        summary: { type: 'string', maxLength: 200, description: 'One or two sentences on how the session went' },
+        summary: { type: 'string', maxLength: 200, description: '一句简短中文（不超过 40 字）：是否专注在任务上，被什么打断' },
         distractions: {
           type: 'array',
           description: 'Off-task stretches; times are seconds relative to session start',
@@ -25,7 +25,7 @@ const EVAL_TOOL = {
             properties: {
               start_sec: { type: 'number' },
               end_sec: { type: 'number' },
-              reason: { type: 'string' },
+              reason: { type: 'string', description: '简短中文，如「刷 B 站」' },
             },
             required: ['start_sec', 'end_sec', 'reason'],
           },

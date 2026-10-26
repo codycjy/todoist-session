@@ -21,6 +21,10 @@ private struct SettingsForm: View {
     @State private var tokenText = ""
     @State private var hasStoredToken = false
     @State private var keychainFailed = false
+    @State private var editingProfile: String? = DemoData.initialTab == "profiles" ? "c-work" : nil
+    @State private var profileApp = ""
+    @State private var profileDomain = ""
+    @AppStorage(Shortcuts.enabledKey) private var shortcutsEnabled = true
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -35,6 +39,7 @@ private struct SettingsForm: View {
                 }
                 switch section {
                 case .timing: timing
+                case .profiles: profiles
                 case .blocking: blocking
                 case .appearance: AppearancePicker()
                 case .backend: backend
@@ -59,6 +64,17 @@ private struct SettingsForm: View {
             }
             row("闲置阈值", hint: "超过这么久没有键鼠操作，记为闲置") {
                 StepperField(value: idleSeconds, range: 30...1800, step: 30, unit: "秒")
+            }
+            row("休息", hint: "没有分类设置时") {
+                Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")
+                    .font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+            }
+            row("快捷指令", hint: "开始时运行 session_start，结束时运行 session_end") {
+                VStack(alignment: .leading, spacing: 6) {
+                    InkToggle(isOn: $shortcutsEnabled, label: "运行快捷指令")
+                    Text("在「快捷指令」App 里新建同名快捷指令即可，没有就跳过。输入是 JSON 文本：event（start / complete / abandon）、title、category、plannedMinutes、actualMinutes。")
+                        .font(.system(size: 11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                }
             }
             if !store.overridden.isEmpty {
                 note("环境变量正在覆盖部分设置（开发模式），此处修改不会生效。").padding(.top, 12)
@@ -111,6 +127,108 @@ private struct SettingsForm: View {
             }
             .padding(.top, 16)
             note("环境变量 SESSION_API_URL / SESSION_API_TOKEN 若已设置，会优先于此处的值。").padding(.top, 16)
+        }
+    }
+
+    // MARK: 分类 profile
+
+    private var profiles: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            note("给分类单独设定专注 / 休息时长和黑名单，例如 Coding 专注 50 分钟、休息 25 分钟。选了这个分类（或 Todoist 项目）开始专注时生效；没设置的分类用全局设置。")
+            if model.categories.isEmpty {
+                Text("还没有分类。今日 Todoist 任务的项目和自定义分类会出现在这里。")
+                    .font(.system(size: 12.5)).foregroundStyle(Ink.faint)
+            }
+            VStack(spacing: 0) {
+                ForEach(model.categories) { c in profileRow(c) }
+            }
+        }
+    }
+
+    private func profileRow(_ c: Category) -> some View {
+        let p = store.values.profiles[c.id]
+        let open = editingProfile == c.id
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { editingProfile = open ? nil : c.id }
+            } label: {
+                HStack(spacing: 10) {
+                    CategoryMark(color: Color(todoistColor: c.color), size: 9)
+                    Text(c.name).font(.system(size: 13.5, weight: .semibold))
+                    Spacer()
+                    Text(p.map(profileSummary) ?? "使用全局设置").font(.inkMono(11)).foregroundStyle(p == nil ? Ink.faint : Ink.sub)
+                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.sub)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverRow(selected: open)
+            if open { profileEditor(c.id).padding(.horizontal, 10).padding(.bottom, 14) }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Ink.ruleSoft).frame(height: 1) }
+    }
+
+    private func profileSummary(_ p: CategoryProfile) -> String {
+        var parts = ["专注 \(p.focusSeconds / 60)m", "休息 \(p.breakSeconds / 60)m"]
+        let extra = p.blockApps.count + p.blockDomains.count
+        parts.append(p.inheritBlocklist ? (extra > 0 ? "全局 + \(extra)" : "全局黑名单") : "专属黑名单 \(extra)")
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder private func profileEditor(_ id: String) -> some View {
+        let p = store.values.profiles[id]
+        VStack(alignment: .leading, spacing: 0) {
+            InkToggle(isOn: Binding(get: { p != nil }, set: { on in
+                store.update { s in
+                    s.profiles[id] = on ? CategoryProfile(focusSeconds: s.focusSeconds, breakSeconds: AppSettings.shortBreakSeconds) : nil
+                }
+            }), label: "这个分类使用专属设置").padding(.vertical, 12)
+            if p != nil {
+                row("专注时长") { StepperField(value: profileBinding(id, \.focusSeconds, scale: 60), range: 5...120, step: 5, unit: "分钟") }
+                row("休息时长", hint: "这个分类专注结束后的休息，长短休都用它") {
+                    StepperField(value: profileBinding(id, \.breakSeconds, scale: 60), range: 1...60, step: 5, unit: "分钟")
+                }
+                row("黑名单", hint: "全局名单 \(store.values.blockApps.count + store.values.blockDomains.count) 条") {
+                    InkToggle(isOn: Binding(get: { store.values.profiles[id]?.inheritBlocklist ?? true },
+                                            set: { v in store.update { $0.profiles[id]?.inheritBlocklist = v } }),
+                              label: "继承全局黑名单，再加上下面的专属条目")
+                }
+                HStack(alignment: .top, spacing: 24) {
+                    listBlock(title: "专属 App", items: p?.blockApps ?? [], mono: true,
+                              remove: { a in store.update { $0.profiles[id]?.blockApps.removeAll { $0 == a } } }) {
+                        HStack(spacing: 6) {
+                            TextField("bundle id", text: $profileApp).textFieldStyle(InkFieldStyle())
+                                .onSubmit { addProfileItem(id, app: true) }
+                            Menu("运行中") {
+                                ForEach(Self.runningApps(), id: \.id) { app in
+                                    Button(app.name) { store.update { $0.profiles[id]?.blockApps.append(app.id) } }
+                                }
+                            }
+                            .menuStyle(.borderlessButton).fixedSize()
+                        }
+                    }
+                    listBlock(title: "专属网站", items: p?.blockDomains ?? [], mono: true,
+                              remove: { d in store.update { $0.profiles[id]?.blockDomains.removeAll { $0 == d } } }) {
+                        TextField("域名，回车添加", text: $profileDomain).textFieldStyle(InkFieldStyle())
+                            .onSubmit { addProfileItem(id, app: false) }
+                    }
+                }
+                .padding(.top, 14)
+            }
+        }
+    }
+
+    private func profileBinding(_ id: String, _ key: WritableKeyPath<CategoryProfile, Int>, scale: Int) -> Binding<Int> {
+        Binding(get: { (store.values.profiles[id]?[keyPath: key] ?? 0) / scale },
+                set: { v in store.update { $0.profiles[id]?[keyPath: key] = v * scale } })
+    }
+
+    private func addProfileItem(_ id: String, app: Bool) {
+        let value = app ? profileApp : profileDomain
+        if app { profileApp = "" } else { profileDomain = "" }
+        store.update { s in
+            if app { s.profiles[id]?.blockApps.append(value) } else { s.profiles[id]?.blockDomains.append(value) }
         }
     }
 
@@ -301,5 +419,23 @@ private struct AppearancePicker: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(paper)
+    }
+}
+
+/// 方框勾选开关，替代系统 Toggle。
+struct InkToggle: View {
+    @Binding var isOn: Bool
+    let label: String
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square").font(.system(size: 13))
+                Text(label).font(.system(size: 13))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Ink.ink)
     }
 }

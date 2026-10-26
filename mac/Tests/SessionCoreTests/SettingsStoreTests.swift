@@ -165,4 +165,36 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(SettingsStore.merge(local: local, remote: remote, localDirty: false), .useRemote(remote))
         XCTAssertEqual(SettingsStore.merge(local: local, remote: remote, localDirty: true), .pushLocal)
     }
+
+    func testProfileDrivesFocusBreakAndBlocklist() {
+        var s = AppSettings(focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: ["g.app"], blockDomains: ["g.com"])
+        s.profiles["coding"] = CategoryProfile(focusSeconds: 3000, breakSeconds: 1500, inheritBlocklist: true,
+                                               blockApps: ["p.app"], blockDomains: ["P.com"])
+        s.profiles["solo"] = CategoryProfile(focusSeconds: 1200, breakSeconds: 300, inheritBlocklist: false, blockDomains: ["only.com"])
+        s = s.normalized()
+        XCTAssertEqual(s.focusSeconds(for: "coding"), 3000)
+        XCTAssertEqual(s.focusSeconds(for: nil), 1500)
+        XCTAssertEqual(s.breakSeconds(for: "coding", kind: .long), 1500)
+        XCTAssertEqual(s.breakSeconds(for: "other", kind: .short), AppSettings.shortBreakSeconds)
+        XCTAssertEqual(s.breakSeconds(for: nil, kind: .long), AppSettings.longBreakSeconds)
+        XCTAssertEqual(s.blocklist(for: "coding"), BlockList(apps: ["g.app", "p.app"], domains: ["g.com", "p.com"]))
+        XCTAssertEqual(s.blocklist(for: "solo"), BlockList(apps: [], domains: ["only.com"]))
+        XCTAssertEqual(s.blocklist(for: nil), BlockList(apps: ["g.app"], domains: ["g.com"]))
+    }
+
+    @MainActor
+    func testProfilesPersistAcrossStores() {
+        let suite = "profiles-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let a = SettingsStore(defaults: defaults, env: [:])
+        a.update { $0.profiles["c1"] = CategoryProfile(focusSeconds: 3000, breakSeconds: 600) }
+        let b = SettingsStore(defaults: defaults, env: [:])
+        XCTAssertEqual(b.values.profiles["c1"]?.focusSeconds, 3000)
+    }
+
+    func testRemoteSettingsWithoutProfilesDecode() throws {
+        let r = try JSONDecoder().decode(RemoteSettings.self, from: Data(#"{"focusSeconds":1500,"idleThresholdSeconds":120,"blockApps":[],"blockDomains":[]}"#.utf8))
+        XCTAssertEqual(r.profiles, [:])
+    }
 }

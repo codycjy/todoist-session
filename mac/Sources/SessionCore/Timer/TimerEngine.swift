@@ -34,7 +34,8 @@ public struct FocusRun: Codable, Equatable, Identifiable, Sendable {
     public let todoistTaskId: String?
     public let entryId: String?
     public let startedAt: Date
-    public let plannedSeconds: Int
+    /// 进行中可以用 `adjust(by:)` 加减。
+    public internal(set) var plannedSeconds: Int
     public var endAt: Date { startedAt.addingTimeInterval(TimeInterval(plannedSeconds)) }
 }
 
@@ -61,6 +62,10 @@ public final class TimerEngine {
     private let longBreakEvery: Int
 
     public var completedCount: Int { store.completedCount }
+    public var currentRunCategoryId: String? {
+        if case .focusing(let run) = phase { return run.categoryId }
+        return nil
+    }
     public var suggestedBreak: BreakKind {
         let n = store.completedCount
         return n > 0 && n % longBreakEvery == 0 ? .long : .short
@@ -98,6 +103,26 @@ public final class TimerEngine {
     public func abandon() {
         guard case .focusing = phase else { return }
         setPhase(.idle)
+    }
+
+    /// 进行中的专注加减时长（秒）。减到剩余不足 1 分钟时停在 1 分钟；返回是否有变化。
+    @discardableResult
+    public func adjust(by delta: Int) -> Bool {
+        guard case .focusing(var run) = phase else { return false }
+        let elapsed = Int(clock.now.timeIntervalSince(run.startedAt).rounded(.up))
+        let next = max(run.plannedSeconds + delta, elapsed + 60)
+        guard next != run.plannedSeconds else { return false }
+        run.plannedSeconds = next
+        setPhase(.focusing(run))
+        return true
+    }
+
+    /// 提前完成：按现在结束并计为一次完成（照常计入长休节奏），由调用方入库。不触发 onCompleted。
+    public func finishEarly() -> CompletedFocus? {
+        guard case .focusing(let run) = phase else { return nil }
+        store.completedCount += 1
+        setPhase(.idle)
+        return CompletedFocus(run: run, endedAt: clock.now)
     }
 
     public func startBreak(_ kind: BreakKind, seconds: Int) throws {

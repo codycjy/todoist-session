@@ -8,17 +8,33 @@ import { users } from '../db/schema.js'
 const listItem = z.string().trim().min(1).max(200)
 const dedupe = (xs: string[]) => [...new Set(xs)]
 
+const focusSeconds = z.number().int().min(60).max(7200)
+const blockApps = z.array(listItem).max(200).transform(dedupe)
+const blockDomains = z.array(listItem.transform((d) => d.toLowerCase())).max(200).transform(dedupe)
+
+/** 分类 profile：该分类专注时用的时长、休息时长和黑名单（可选继承全局名单再追加） */
+const profile = z.object({
+  focusSeconds,
+  breakSeconds: z.number().int().min(60).max(3600),
+  inheritBlocklist: z.boolean(),
+  blockApps,
+  blockDomains,
+})
+
 const fields = {
-  focusSeconds: z.number().int().min(60).max(7200),
+  focusSeconds,
   idleThresholdSeconds: z.number().int().min(30).max(1800),
-  blockApps: z.array(listItem).max(200).transform(dedupe),
-  blockDomains: z.array(listItem.transform((d) => d.toLowerCase())).max(200).transform(dedupe),
+  blockApps,
+  blockDomains,
+  /** categoryId → profile；整体替换 */
+  profiles: z.record(z.string().min(1).max(64), profile)
+    .refine((r) => Object.keys(r).length <= 100, 'too many profiles'),
 }
 /** PUT 接受部分字段；未知字段被 zod 丢弃 */
 const patchSchema = z.object(fields).partial()
 
 export type Settings = { [K in keyof typeof fields]: z.output<(typeof fields)[K]> }
-export const DEFAULT_SETTINGS: Settings = { focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [] }
+export const DEFAULT_SETTINGS: Settings = { focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [], profiles: {} }
 
 /** 逐字段读取已存值，缺失或不合法的字段回退默认值 */
 function resolve(stored: Record<string, unknown>): Settings {

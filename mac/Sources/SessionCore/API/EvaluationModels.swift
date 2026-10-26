@@ -107,10 +107,23 @@ public struct RemoteSettings: Codable, Equatable, Sendable {
     public var idleThresholdSeconds: Int
     public var blockApps: [String]
     public var blockDomains: [String]
+    /// categoryId → profile。旧后端没有这个字段时为空。
+    public var profiles: [String: CategoryProfile]
 
-    public init(focusSeconds: Int, idleThresholdSeconds: Int, blockApps: [String], blockDomains: [String]) {
+    public init(focusSeconds: Int, idleThresholdSeconds: Int, blockApps: [String], blockDomains: [String],
+                profiles: [String: CategoryProfile] = [:]) {
         self.focusSeconds = focusSeconds; self.idleThresholdSeconds = idleThresholdSeconds
-        self.blockApps = blockApps; self.blockDomains = blockDomains
+        self.blockApps = blockApps; self.blockDomains = blockDomains; self.profiles = profiles
+    }
+
+    private enum CodingKeys: String, CodingKey { case focusSeconds, idleThresholdSeconds, blockApps, blockDomains, profiles }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        focusSeconds = try c.decode(Int.self, forKey: .focusSeconds)
+        idleThresholdSeconds = try c.decode(Int.self, forKey: .idleThresholdSeconds)
+        blockApps = try c.decode([String].self, forKey: .blockApps)
+        blockDomains = try c.decode([String].self, forKey: .blockDomains)
+        profiles = try c.decodeIfPresent([String: CategoryProfile].self, forKey: .profiles) ?? [:]
     }
 }
 
@@ -120,10 +133,11 @@ public struct SettingsPatch: Encodable, Equatable, Sendable {
     public var idleThresholdSeconds: Int?
     public var blockApps: [String]?
     public var blockDomains: [String]?
+    public var profiles: [String: CategoryProfile]?
 
     public init(focusSeconds: Int? = nil, idleThresholdSeconds: Int? = nil,
-                blockApps: [String]? = nil, blockDomains: [String]? = nil) {
+                blockApps: [String]? = nil, blockDomains: [String]? = nil, profiles: [String: CategoryProfile]? = nil) {
         self.focusSeconds = focusSeconds; self.idleThresholdSeconds = idleThresholdSeconds
-        self.blockApps = blockApps; self.blockDomains = blockDomains
+        self.blockApps = blockApps; self.blockDomains = blockDomains; self.profiles = profiles
     }
 }

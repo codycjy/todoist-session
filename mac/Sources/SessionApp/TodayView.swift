@@ -15,10 +15,16 @@ struct TodayView: View {
 
     private var idle: Bool { model.engine.phase == .idle }
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var effectiveMinutes: Int { minutes ?? model.defaultFocusSeconds / 60 }
+    /// 没手动选时长时用所选分类 profile 的时长（没有 profile 就是全局默认）。
+    private var effectiveMinutes: Int { minutes ?? model.focusSeconds(for: categoryId) / 60 }
     private var selectedTask: TodoistTask? { model.tasks.first { $0.id == selectedTaskId } }
     private var selectedSession: SessionRecord? { model.todaySessions.first { $0.id == selectedSessionId } }
     private var hasPanel: Bool { selectedTask != nil || selectedSession != nil }
+
+    private func dismissPanels() {
+        guard hasPanel else { return }
+        select(task: nil); select(session: nil)
+    }
 
     private func select(task id: String?) {
         withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = id; if id != nil { selectedSessionId = nil } }
@@ -40,16 +46,29 @@ struct TodayView: View {
 
     private static let zh = Locale(identifier: "zh_CN")
 
-    private var page: some View {
+    @ViewBuilder private var page: some View {
+        if case .focusing(let run) = model.engine.phase {
+            // 专注中：整块中间区域只放计时卡片，数字按可用空间放大；任务列表收起，减少干扰。
+            VStack(alignment: .leading, spacing: 22) {
+                header
+                FocusCard(run: run, task: model.tasks.first { $0.id == run.todoistTaskId })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.horizontal, 32).padding(.top, 44).padding(.bottom, 28)
+        } else {
+            planningPage
+        }
+    }
+
+    private var planningPage: some View {
         // 详情面板与上方内容同一列：同样的左右边距和 720 宽上限，靠左对齐。
         ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
                     header
-                    switch model.engine.phase {
-                    case .focusing(let run): FocusCard(run: run, task: model.tasks.first { $0.id == run.todoistTaskId })
-                    case .breaking: BreakCard()
-                    case .idle:
+                    if case .breaking = model.engine.phase {
+                        BreakCard()
+                    } else {
                         if let done = model.pendingCompletion { CompletionCard(done: done) }
                         composer
                     }
@@ -62,10 +81,12 @@ struct TodayView: View {
                 .padding(.bottom, hasPanel ? 340 : 32)
                 .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // 点页面空白处收起底部详情（行、按钮、输入框各自的点击优先）。
+                .background(Color.clear.contentShape(Rectangle()).onTapGesture { dismissPanels() })
             }
             if let task = selectedTask {
                 TaskDetailPanel(task: task, category: category(of: task), canStart: idle,
-                                defaultMinutes: model.defaultFocusSeconds / 60,
+                                defaultMinutes: model.focusSeconds(for: model.categoryId(for: task)) / 60,
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
                                 onClose: { select(task: nil) })
                     .padding(.horizontal, 32).padding(.bottom, 20)
@@ -102,8 +123,8 @@ struct TodayView: View {
                 .onSubmit(start)
             HStack(spacing: 6) {
                 Menu {
-                    Button("无分类") { categoryId = nil }
-                    ForEach(model.categories) { c in Button(c.name) { categoryId = c.id } }
+                    Button("无分类") { categoryId = nil; minutes = nil }
+                    ForEach(model.categories) { c in Button(c.name) { categoryId = c.id; minutes = nil } }
                 } label: {
                     HStack(spacing: 5) {
                         CategoryMark(color: model.category(for: categoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
@@ -133,7 +154,7 @@ struct TodayView: View {
                         Text("常用").font(.inkMono(10, weight: .semibold)).tracking(1).foregroundStyle(Ink.faint)
                         ForEach(model.entries) { e in
                             InkChip(text: e.title, mark: model.category(for: e.categoryId).map { Color(todoistColor: $0.color) }) {
-                                title = e.title; categoryId = e.categoryId; composerFocused = true
+                                title = e.title; categoryId = e.categoryId; minutes = nil; composerFocused = true
                             }
                         }
                     }
@@ -145,7 +166,7 @@ struct TodayView: View {
 
     private var durationOptions: [Int] {
         var opts = [15, 25, 45, 60]
-        let d = model.defaultFocusSeconds / 60
+        let d = model.focusSeconds(for: categoryId) / 60
         if !opts.contains(d) { opts.append(d); opts.sort() }
         return opts
     }
@@ -325,27 +346,35 @@ private struct FocusCard: View {
                 Spacer()
                 Text("\(Ink.hm(run.startedAt)) → \(Ink.hm(run.endAt))").font(.inkMono(11)).foregroundStyle(Ink.sub)
             }
-            Text(run.title).font(.system(size: 22, weight: .semibold)).lineLimit(2)
+            Text(run.title).font(.system(size: 28, weight: .semibold)).lineLimit(2)
+            // 数字先按很大的字号排，再按卡片剩余的宽高缩到刚好放下。
             Text(AppModel.format(remaining))
-                .font(.system(size: 96, weight: .light, design: .monospaced))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                .font(.system(size: 320, weight: .light, design: .monospaced))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.15)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             ProgressRule(progress: progress, minutes: run.plannedSeconds / 60)
-            HStack {
-                Button("放弃（不记录）") { model.abandon() }.buttonStyle(.ink)
-                Spacer()
-                if model.accessibilityMissing {
-                    Text("未授权辅助功能：只按 App 记录").font(.inkMono(10)).foregroundStyle(Ink.now)
+            HStack(spacing: 8) {
+                FocusAdjustButtons()
+                Button { model.finishEarly() } label: {
+                    HStack(spacing: 5) { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)); Text("提前完成") }
                 }
+                .buttonStyle(.inkPrimary)
+                .help("现在结束并记录这次专注，休息时长不变")
+                Spacer()
+                Button("放弃（不记录）") { model.abandon() }.buttonStyle(.inkQuiet).foregroundStyle(Ink.sub)
+            }
+            if model.accessibilityMissing {
+                Text("未授权辅助功能：只按 App 记录").font(.inkMono(10)).foregroundStyle(Ink.now)
             }
             if let task, !task.description.isEmpty {
                 Rectangle().fill(Ink.rule).frame(height: 1)
                 Text((try? AttributedString(markdown: task.description,
                                             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                      ?? AttributedString(task.description))
-                    .font(.system(size: 12.5)).foregroundStyle(Ink.sub).lineLimit(4)
+                    .font(.system(size: 13)).foregroundStyle(Ink.sub).lineLimit(4)
             }
         }
-        .inkPanel(padding: 22)
+        .inkPanel(padding: 28)
     }
 }
 
@@ -402,7 +431,7 @@ private struct CompletionCard: View {
                     .font(.inkMono(11)).foregroundStyle(Ink.sub)
             }
             Spacer()
-            Button(model.engine.suggestedBreak == .long ? "长休 15 分钟" : "休息 5 分钟") { model.startBreak() }
+            Button("\(model.engine.suggestedBreak == .long ? "长休" : "休息") \(model.suggestedBreakSeconds / 60) 分钟") { model.startBreak() }
                 .buttonStyle(.ink)
             Button("好") { model.dismissCompletion() }.buttonStyle(.inkPrimary)
         }
@@ -419,10 +448,31 @@ struct CompletionBanner: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("✓ 完成：\(done.run.title)").font(.system(size: 13, weight: .semibold)).lineLimit(2)
             HStack {
-                Button(model.engine.suggestedBreak == .long ? "开始长休 15 分钟" : "开始休息 5 分钟") { model.startBreak() }
+                Button("开始\(model.engine.suggestedBreak == .long ? "长休" : "休息") \(model.suggestedBreakSeconds / 60) 分钟") { model.startBreak() }
                     .buttonStyle(InkButtonStyle(compact: true))
                 Button("结束") { model.dismissCompletion() }.buttonStyle(InkButtonStyle(kind: .primary, compact: true))
             }
         }
+    }
+}
+
+/// 「−5 / +5」分钟，主窗口与菜单栏面板共用。剩余不足 6 分钟时 −5 变灰（引擎会停在 1 分钟）。
+struct FocusAdjustButtons: View {
+    @EnvironmentObject var model: AppModel
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button { model.adjust(minutes: -5) } label: { Text("−5").frame(minWidth: compact ? 26 : 34) }
+                .disabled(model.engine.remainingSeconds <= 6 * 60)
+                .help("减少 5 分钟")
+            Rectangle().fill(Ink.ink.opacity(0.7)).frame(width: 1)
+            Button { model.adjust(minutes: 5) } label: { Text("+5").frame(minWidth: compact ? 26 : 34) }
+                .help("增加 5 分钟")
+        }
+        .buttonStyle(InkButtonStyle(kind: .quiet, compact: compact))
+        .font(.inkMono(compact ? 11 : 12, weight: .semibold))
+        .overlay(Rectangle().strokeBorder(Ink.ink.opacity(0.7), lineWidth: 1))
+        .fixedSize()
     }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTimeline, buildUserPrompt, MAX_SPANS, MAX_TITLE_CHARS } from './prompt.js'
+import { buildTimeline, buildUserPrompt, MAX_SPANS, MAX_TITLE_CHARS, SYSTEM_PROMPT } from './prompt.js'
 import type { EvalInput, EvalSpan } from './types.js'
 
 const T0 = 1_000_000
@@ -132,5 +132,12 @@ describe('prompt hardening', () => {
     const p = buildUserPrompt(input({ title: long, categoryName: long, spans: [span(0, 5, { appName: long, windowTitle: long })] }))
     expect(p).not.toContain('a'.repeat(121))
     expect(block(p)).toContain('a'.repeat(120))
+  })
+})
+
+describe('SYSTEM_PROMPT', () => {
+  it('asks for a short Simplified Chinese summary', () => {
+    expect(SYSTEM_PROMPT).toContain('Simplified Chinese')
+    expect(SYSTEM_PROMPT).toContain('40 Chinese characters')
   })
 })
