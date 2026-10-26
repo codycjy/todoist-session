@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 import { createApp } from './app.js'
 import { assertSecret } from './config.js'
 import { createDb } from './db/client.js'
-import { createAnthropicEvaluator } from './eval/anthropic.js'
+import { createOpenRouterEvaluator } from './eval/openrouter.js'
 import { createEvalWorker } from './eval/worker.js'
 import { createTodoistGateway } from './todoist/sdk.js'
 
@@ -13,7 +13,7 @@ const secret = assertSecret(process.env.APP_SECRET)
 const dbPath = process.env.DB_PATH ?? './data/session.db'
 mkdirSync(dirname(dbPath), { recursive: true })
 
-const evalModel = process.env.EVAL_MODEL || 'claude-haiku-5-5'
+const evalModel = process.env.EVAL_MODEL || 'deepseek/deepseek-v4.1-flash-1017'
 const evalPromptVersion = process.env.EVAL_PROMPT_VERSION || 'v1'
 const EVAL_INTERVAL_MS = 10_000
 
@@ -22,12 +22,12 @@ const app = createApp({ db, makeGateway: createTodoistGateway, secret, evalModel
 const port = Number(process.env.PORT ?? 8787)
 const server = serve({ fetch: app.fetch, port }, () => console.log(`session-backend listening on :${port}`))
 
-// 评估 worker：没有 ANTHROPIC_API_KEY 时不启动，评估保持 pending
+// 评估 worker：没有 OPENAI_API_KEY（OpenRouter key）时不启动，评估保持 pending
 let evalTimer: NodeJS.Timeout | undefined
-const anthropicKey = process.env.ANTHROPIC_API_KEY
-if (anthropicKey) {
+const evalKey = process.env.OPENAI_API_KEY
+if (evalKey) {
   const worker = createEvalWorker({
-    db, now: Date.now, evaluator: createAnthropicEvaluator({ apiKey: anthropicKey, model: evalModel }),
+    db, now: Date.now, evaluator: createOpenRouterEvaluator({ apiKey: evalKey, model: evalModel, baseUrl: process.env.OPENAI_BASE_URL || undefined }),
   })
   let running = false
   evalTimer = setInterval(() => {
@@ -38,7 +38,7 @@ if (anthropicKey) {
       .finally(() => { running = false })
   }, EVAL_INTERVAL_MS)
 } else {
-  console.log('ANTHROPIC_API_KEY is not set: session evaluation is disabled (evaluations stay pending)')
+  console.log('OPENAI_API_KEY is not set: session evaluation is disabled (evaluations stay pending)')
 }
 
 function shutdown() {

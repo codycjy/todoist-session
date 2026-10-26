@@ -7,10 +7,10 @@
 
 ## 待用户真机验证
 ### M3 评估
-1. 后端设置 `ANTHROPIC_API_KEY` 后完成一个 session：色块从 `…` 变为分数；详情有总结与偏离片段。
+1. 后端设置 `OPENAI_API_KEY`（OpenRouter key，模型默认 `deepseek/deepseek-v4.1-flash-1017`） 后完成一个 session：色块从 `…` 变为分数；详情有总结与偏离片段。
 2. 用无效 key：3 次后显示 `—`，点“重新评估”回到 `…`。
 3. 后端关闭 / 未配置 token 时不出现错误条。
-4. 第一次真实评估要看后端日志有无 `API_ERROR`：Anthropic SDK 的请求格式只对照过文档与类型，没有真实调用过。
+4. 第一次真实评估要看后端日志有无 `API_ERROR`：OpenRouter 请求（含 tool calling，失败时退回解析 content 里的 JSON）只用 fake 传输测试过，没有真实调用过；该模型是否支持强制 tool_choice 未验证。
 
 ### M4 设置 / 权限
 5. 首次启动弹出一次权限引导，重启后不再弹。

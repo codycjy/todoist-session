@@ -36,7 +36,7 @@ export function createApp(deps: AppDeps) {
   api.route('/entries', entryRoutes(deps.db, now))
   api.route('/sync', syncRoutes(deps.db, {
     now,
-    model: deps.evalModel ?? 'claude-haiku-5-5',
+    model: deps.evalModel ?? 'deepseek/deepseek-v4.1-flash-1017',
     promptVersion: deps.evalPromptVersion ?? 'v1',
   }))
   api.route('/sessions', sessionRoutes(deps.db))

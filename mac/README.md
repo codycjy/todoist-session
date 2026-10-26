@@ -29,7 +29,7 @@ SIGN_IDENTITY="Session Dev" scripts/build-app.sh   # 使用自签证书
 | `SESSION_BLOCK_APPS` / `SESSION_BLOCK_DOMAINS` | 逗号分隔的黑名单覆盖 |
 | `SESSION_DEBUG=1` | 打开调试日志 |
 
-后端需要运行并可访问；统计页与 LLM 评估依赖后端（评估还需要后端配置 `ANTHROPIC_API_KEY`，见 backend 的 `.env.example`）。
+后端需要运行并可访问；统计页与 LLM 评估依赖后端（评估还需要后端配置 `OPENAI_API_KEY`（OpenRouter key），见 backend 的 `.env.example`）。
 
 ## 需要的系统权限
 

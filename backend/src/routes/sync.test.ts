@@ -91,7 +91,7 @@ it('creates a pending evaluation for each new session', async () => {
   expect(rows).toHaveLength(1)
   expect(rows[0]).toMatchObject({
     sessionId: 's1', userId: 'u1', status: 'pending', attempts: 0, focusScore: null,
-    summary: null, distractions: [], model: 'claude-haiku-5-5', promptVersion: 'v1', lastError: null,
+    summary: null, distractions: [], model: 'deepseek/deepseek-v4.1-flash-1017', promptVersion: 'v1', lastError: null,
   })
   expect(rows[0]!.createdAt.getTime()).toBe(5_000)
 })
