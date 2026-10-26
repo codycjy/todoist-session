@@ -43,6 +43,18 @@ export interface SyncOptions {
   promptVersion: string
 }
 
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+
+function insertSpans(tx: Tx, s: z.infer<typeof sessionSchema>) {
+  for (let i = 0; i < s.spans.length; i += SPAN_CHUNK) {
+    tx.insert(activitySpans).values(
+      s.spans.slice(i, i + SPAN_CHUNK).map((p) => ({
+        ...p, sessionId: s.id, startedAt: new Date(p.startedAt), endedAt: new Date(p.endedAt),
+      })),
+    ).onConflictDoNothing().run()
+  }
+}
+
 export function syncRoutes(db: Db, opts: SyncOptions) {
   const r = new Hono<AppEnv>()
 
@@ -59,7 +71,16 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
 
       const outcome = db.transaction((tx) => {
         const existing = tx.select({ userId: sessions.userId }).from(sessions).where(eq(sessions.id, s.id)).get()
-        if (existing) return existing.userId === userId ? 'ok' : 'conflict'
+        if (existing) {
+          if (existing.userId !== userId) return 'conflict'
+          // 重传 = 客户端编辑过（标题、时长）：覆盖可编辑字段并替换 span；评估保留不重置。
+          tx.update(sessions).set({
+            titleSnapshot: s.title, actualSeconds: s.actualSeconds, endedAt: new Date(s.endedAt),
+          }).where(eq(sessions.id, s.id)).run()
+          tx.delete(activitySpans).where(eq(activitySpans.sessionId, s.id)).run()
+          insertSpans(tx, s)
+          return 'ok'
+        }
 
         const categoryId = s.categoryId &&
           tx.select({ id: categories.id }).from(categories)
@@ -82,13 +103,7 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
           createdAt: at, updatedAt: at,
         }).run()
 
-        for (let i = 0; i < s.spans.length; i += SPAN_CHUNK) {
-          tx.insert(activitySpans).values(
-            s.spans.slice(i, i + SPAN_CHUNK).map((p) => ({
-              ...p, sessionId: s.id, startedAt: new Date(p.startedAt), endedAt: new Date(p.endedAt),
-            })),
-          ).onConflictDoNothing().run()
-        }
+        insertSpans(tx, s)
         return 'ok'
       })
 

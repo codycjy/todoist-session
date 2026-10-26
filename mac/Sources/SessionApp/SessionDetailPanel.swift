@@ -11,6 +11,10 @@ struct SessionDetailPanel: View {
     let onClose: () -> Void
 
     @State private var showAllSpans = false
+    /// 编辑模式：标题与实际时长（分钟）的草稿。
+    @State private var editing = false
+    @State private var draftTitle = ""
+    @State private var draftMinutes = 0
 
     private var evaluation: Evaluation? { model.evaluations[session.id] }
     private var spans: [ActivitySpan] { model.spans(for: session.id) }
@@ -34,7 +38,8 @@ struct SessionDetailPanel: View {
         }
         .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .onChange(of: session.id) { _, _ in showAllSpans = false }
+        .onChange(of: session.id) { _, _ in showAllSpans = false; editing = false }
+        .onAppear { if DemoData.editsSession { beginEdit() } }
     }
 
     // MARK: 头部：分类、同步状态、标题、时间与评分
@@ -58,21 +63,83 @@ struct SessionDetailPanel: View {
                         .buttonStyle(.plain).font(.inkMono(11)).foregroundStyle(Ink.sub)
                     }
                 }
-                Text(session.title).font(.ink(19, weight: .semibold))
-                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 18) {
-                    fact("时间", "\(Ink.hm(session.startedAt))–\(Ink.hm(session.endedAt))")
-                    fact("实际", Ink.duration(session.actualSeconds))
-                    fact("计划", Ink.duration(session.plannedSeconds))
-                    if let blocked = blockedCount, blocked > 0 { fact("拦截", "\(blocked) 次") }
+                if editing {
+                    editor
+                } else {
+                    Text(session.title).font(.ink(19, weight: .semibold))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 18) {
+                        fact("时间", "\(Ink.hm(session.startedAt))–\(Ink.hm(session.endedAt))")
+                        fact("实际", Ink.duration(session.actualSeconds))
+                        fact("计划", Ink.duration(session.plannedSeconds))
+                        if let blocked = blockedCount, blocked > 0 { fact("拦截", "\(blocked) 次") }
+                    }
                 }
             }
             Spacer(minLength: 8)
             scoreBox
+            if !editing {
+                Button(action: beginEdit) { Image(systemName: "pencil").font(.ink(12, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(Ink.sub)
+                    .help("编辑标题和时长")
+                    .accessibilityLabel("编辑")
+            }
             Button(action: onClose) { Image(systemName: "xmark").font(.ink(11, weight: .semibold)) }
                 .buttonStyle(.plain).foregroundStyle(Ink.sub)
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("关闭")
+        }
+    }
+
+    // MARK: 编辑
+
+    private func beginEdit() {
+        draftTitle = session.title
+        draftMinutes = max(1, Int((Double(session.actualSeconds) / 60).rounded()))
+        editing = true
+    }
+
+    private var canSave: Bool { !draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private func save() {
+        guard canSave else { return }
+        model.editSession(session.id, title: draftTitle, actualSeconds: min(max(draftMinutes, 1), 600) * 60)
+        editing = false
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("标题", text: $draftTitle)
+                .textFieldStyle(InkFieldStyle(size: 16))
+                .onSubmit(save)
+            HStack(spacing: 12) {
+                Text("实际").font(.inkMono(10)).foregroundStyle(Ink.faint).fixedSize()
+                HStack(spacing: 0) {
+                    Button { draftMinutes = max(1, draftMinutes - 5) } label: { Text("−5").frame(minWidth: 30) }
+                    Rectangle().fill(Ink.ink.opacity(0.7)).frame(width: 1)
+                    TextField("", value: $draftMinutes, format: .number)
+                        .textFieldStyle(.plain).font(.inkMono(14, weight: .medium))
+                        .multilineTextAlignment(.center).frame(width: 52)
+                        .onSubmit(save)
+                    Rectangle().fill(Ink.ink.opacity(0.7)).frame(width: 1)
+                    Button { draftMinutes = min(600, draftMinutes + 5) } label: { Text("+5").frame(minWidth: 30) }
+                }
+                .buttonStyle(InkButtonStyle(kind: .quiet, compact: true))
+                .font(.inkMono(11, weight: .semibold))
+                .overlay(Rectangle().strokeBorder(Ink.ink.opacity(0.7), lineWidth: 1))
+                .fixedSize()
+                Text("分钟").font(.ink(11)).foregroundStyle(Ink.sub).fixedSize()
+                Text("\(Ink.hm(session.startedAt))–\(Ink.hm(session.startedAt.addingTimeInterval(TimeInterval(draftMinutes * 60))))")
+                    .font(.inkMono(11)).foregroundStyle(Ink.sub).fixedSize()
+            }
+            HStack(alignment: .top, spacing: 12) {
+                Text("开始时间不变；缩短时会裁掉之后的活动记录。改完会重新同步，已有评估不会自动重算。")
+                    .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("取消") { editing = false }.buttonStyle(InkButtonStyle(compact: true)).fixedSize()
+                Button("保存", action: save).buttonStyle(InkButtonStyle(kind: .primary, compact: true)).fixedSize()
+                    .disabled(!canSave)
+            }
         }
     }
 

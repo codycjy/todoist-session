@@ -78,6 +78,21 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// 手动编辑已完成的专注：改标题和实际时长（结束时间 = 开始 + 时长）。
+    /// 新结束时间之后的 span 删掉、跨过它的截断；标记为待上传，后端按 id 覆盖。
+    public func edit(sessionId: String, title: String, actualSeconds: Int) throws {
+        try db.write { db in
+            guard let start = try Int64.fetchOne(db, sql: "SELECT started_at FROM sessions WHERE id = ?",
+                                                 arguments: [sessionId]) else { return }
+            let end = start + Int64(actualSeconds) * 1000
+            try db.execute(sql: "UPDATE sessions SET title = ?, actual_seconds = ?, ended_at = ?, sync_state = 'pending' WHERE id = ?",
+                           arguments: [title, actualSeconds, end, sessionId])
+            try db.execute(sql: "DELETE FROM spans WHERE session_id = ? AND started_at >= ?", arguments: [sessionId, end])
+            try db.execute(sql: "UPDATE spans SET ended_at = ? WHERE session_id = ? AND ended_at > ?",
+                           arguments: [end, sessionId, end])
+        }
+    }
+
     public func markSynced(_ ids: [String]) throws { try mark(ids, .synced) }
     public func markRejected(_ ids: [String]) throws { try mark(ids, .rejected) }
 

@@ -270,6 +270,27 @@ final class AppModel: ObservableObject {
                                         kind: engine.suggestedBreak)
     }
 
+    /// 手动修改已完成专注的标题和实际时长；改完重新上传（后端按 id 覆盖）。
+    func editSession(_ id: String, title: String, actualSeconds: Int) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, actualSeconds > 0 else { return }
+        if DemoData.enabled {   // 演示数据不在本地库里，直接改内存
+            todaySessions = todaySessions.map { r in
+                r.id != id ? r : SessionRecord(id: r.id, title: title, categoryId: r.categoryId, source: r.source,
+                                               todoistTaskId: r.todoistTaskId, entryId: r.entryId,
+                                               plannedSeconds: r.plannedSeconds, actualSeconds: actualSeconds,
+                                               startedAt: r.startedAt, endedAt: r.startedAt.addingTimeInterval(TimeInterval(actualSeconds)),
+                                               syncState: .pending)
+            }
+            return
+        }
+        do { try store?.edit(sessionId: id, title: title, actualSeconds: actualSeconds) }
+        catch { errorMessage = "保存修改失败：\(error.localizedDescription)"; return }
+        reloadToday()
+        unsynced = (try? store?.pendingCount()) ?? unsynced
+        Task { await flushSync() }
+    }
+
     func spans(for sessionId: String) -> [ActivitySpan] { (try? store?.spans(sessionId: sessionId)) ?? [] }
 
     func startBreak() {

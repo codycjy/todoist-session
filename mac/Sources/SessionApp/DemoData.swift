@@ -10,6 +10,7 @@ enum DemoData {
     static var snapshotPath: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_SNAPSHOT"] }
     static var selectedTaskId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SELECT"] : nil }
     static var selectedSessionId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SESSION"] : nil }
+    static var editsSession: Bool { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_EDIT"] == "1" }
     static var initialTab: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_TAB"] }
     static var appearance: NSAppearance.Name? {
         switch ProcessInfo.processInfo.environment["SESSION_DEMO_APPEARANCE"] {

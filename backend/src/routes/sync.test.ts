@@ -41,6 +41,21 @@ it('is idempotent: re-posting the same session accepts it without duplicating', 
   expect(db.select().from(activitySpans).all()).toHaveLength(1)
 })
 
+it('re-uploading an edited session updates title, duration and spans', async () => {
+  const { app, db } = makeTestApp()
+  await app.request('/sync/sessions', post({ sessions: [session('s1', {
+    spans: [span('s1-a'), span('s1-b', { startedAt: 1_500, endedAt: 1_900 })],
+  })] }))
+  const res = await app.request('/sync/sessions', post({ sessions: [session('s1', {
+    title: '写周报（改）', actualSeconds: 1, endedAt: 1_400, spans: [span('s1-a', { endedAt: 1_400 })],
+  })] }))
+  expect(await res.json()).toEqual({ accepted: ['s1'], rejected: [] })
+  const row = db.select().from(sessions).where(eq(sessions.id, 's1')).get()
+  expect(row).toMatchObject({ titleSnapshot: '写周报（改）', actualSeconds: 1, endedAt: new Date(1_400) })
+  const spans = db.select().from(activitySpans).all()
+  expect(spans.map((p) => [p.id, p.endedAt.getTime()])).toEqual([['s1-a', 1_400]])
+})
+
 it('nulls out a category that does not exist or belongs to someone else', async () => {
   const { app, db } = makeTestApp()
   db.insert(users).values({ id: 'u2', name: 'other', apiTokenHash: hashToken('x'), createdAt: new Date() }).run()
