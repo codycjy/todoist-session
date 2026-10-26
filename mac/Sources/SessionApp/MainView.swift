@@ -4,13 +4,37 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @State private var showGuide = !UserDefaults.standard.bool(forKey: PermissionGuide.flagKey)
+    @State private var tab: Tab = .today
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case today = "今日", stats = "统计", settings = "设置"
+        var id: String { rawValue }
+    }
 
     var body: some View {
-        TabView {
-            TodayView().tabItem { Label("今日", systemImage: "timer") }
-            StatsView().tabItem { Label("统计", systemImage: "chart.bar") }
-            SettingsView().tabItem { Label("设置", systemImage: "gearshape") }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(Tab.allCases) { t in
+                    Button { tab = t } label: {
+                        Text(t.rawValue).font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16).padding(.vertical, 6)
+                            .foregroundStyle(tab == t ? Ink.paper : Ink.ink)
+                            .background(tab == t ? Ink.ink : Color.clear)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Rectangle().fill(Ink.ink).frame(height: Ink.border)
+            ZStack {
+                // 今日页常驻（保留输入草稿与选中的任务），其余按需创建。
+                TodayView().opacity(tab == .today ? 1 : 0).allowsHitTesting(tab == .today)
+                if tab == .stats { StatsView() }
+                if tab == .settings { SettingsView() }
+            }
         }
+        .inkWindow()
         .sheet(isPresented: $showGuide) {
             PermissionGuideView().environmentObject(model)
         }
@@ -31,10 +55,11 @@ struct PermissionGuideView: View {
             Text("Session 在专注期间需要以下权限才能完整工作。可以随时在「设置」页查看和修改。")
                 .foregroundStyle(.secondary)
             PermissionRows().environmentObject(model.permissions)
-            HStack { Spacer(); Button("知道了") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("知道了") { dismiss() }.buttonStyle(.inkPrimary).keyboardShortcut(.defaultAction) }
         }
         .padding(24)
         .frame(width: 520)
+        .inkWindow()
         .onAppear { UserDefaults.standard.set(true, forKey: PermissionGuide.flagKey) }   // 无论怎样关闭都只弹一次
     }
 }
@@ -72,9 +97,9 @@ struct PermissionRows: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(name).font(.headline)
             if ok {
-                Label(okText, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Label(okText, systemImage: "checkmark.square.fill").foregroundStyle(Ink.ink)
             } else {
-                Label(missingText, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                Label(missingText, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Ink.now)
                 Button("打开系统设置") { Permissions.openSettings(pane) }
             }
         }

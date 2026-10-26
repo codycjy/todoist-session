@@ -13,7 +13,7 @@ struct TodayView: View {
     var body: some View {
         HSplitView {
             left.frame(minWidth: 340)
-            right.frame(minWidth: 300)
+            right.frame(minWidth: 320)
         }
         .task { await model.refreshEvaluations() }
         .toolbar {
@@ -25,32 +25,38 @@ struct TodayView: View {
     }
 
     private var left: some View {
-        List {
-            Section("自定义条目") {
-                HStack {
-                    TextField("标题", text: $title).onSubmit(start)
-                    Picker("分类", selection: $categoryId) {
-                        Text("无分类").tag(String?.none)
-                        ForEach(model.categories) { Text($0.name).tag(String?.some($0.id)) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    InkSectionHeader(text: "自定义条目")
+                    HStack(spacing: 8) {
+                        TextField("标题", text: $title).textFieldStyle(InkFieldStyle()).onSubmit(start)
+                        Picker("分类", selection: $categoryId) {
+                            Text("无分类").tag(String?.none)
+                            ForEach(model.categories) { Text($0.name).tag(String?.some($0.id)) }
+                        }
+                        .labelsHidden().frame(width: 110)
+                        Button("开始", action: start).buttonStyle(.inkPrimary).disabled(!idle || trimmedTitle.isEmpty)
                     }
-                    .labelsHidden().frame(width: 120)
-                    Button("开始", action: start).disabled(!idle || trimmedTitle.isEmpty)
-                }
-                ForEach(model.entries) { entry in
-                    row(entry.title, subtitle: model.category(for: entry.categoryId)?.name) { model.startEntry(entry) }
-                }
-            }
-            Section("Todoist 今日 / 过期") {
-                if model.tasks.isEmpty { Text("没有任务").foregroundStyle(.secondary) }
-                ForEach(model.tasks) { task in
-                    row(task.content, subtitle: model.categories.first { $0.todoistProjectId == task.projectId }?.name) {
-                        model.startTask(task)
+                    ForEach(model.entries) { entry in
+                        row(entry.title, color: model.category(for: entry.categoryId).map { Color(todoistColor: $0.color) },
+                            subtitle: model.category(for: entry.categoryId)?.name, onOpen: nil) { model.startEntry(entry) }
                     }
                 }
+                VStack(alignment: .leading, spacing: 8) {
+                    InkSectionHeader(text: "TODOIST 今日 / 过期")
+                    if model.tasks.isEmpty { Text("没有任务").font(.callout).foregroundStyle(Ink.sub) }
+                    ForEach(model.tasks) { task in
+                        let cat = model.categories.first { $0.todoistProjectId == task.projectId }
+                        row(task.content, color: cat.map { Color(todoistColor: $0.color) }, subtitle: cat?.name,
+                            onOpen: { withAnimation(.easeOut(duration: 0.15)) { pickedTask = task } }) { model.startTask(task) }
+                    }
+                }
+                if let message = model.errorMessage {
+                    Text(message).font(.caption).foregroundStyle(Ink.now)
+                }
             }
-            if let message = model.errorMessage {
-                Text(message).font(.caption).foregroundStyle(.red)
-            }
+            .padding(14)
         }
     }
 
@@ -58,67 +64,68 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 12) {
             switch model.engine.phase {
             case .focusing:
-                Text(model.currentTitle ?? "").font(.title2)
-                Text(AppModel.format(model.engine.remainingSeconds))
-                    .font(.system(size: 56, weight: .semibold, design: .monospaced))
-                Button("放弃（不记录）", role: .destructive) { model.abandon() }
+                timerPanel(title: model.currentTitle ?? "", action: AnyView(
+                    Button("放弃（不记录）") { model.abandon() }.buttonStyle(.ink)))
             case .breaking:
-                Text("休息中").font(.title2)
-                Text(AppModel.format(model.engine.remainingSeconds))
-                    .font(.system(size: 56, weight: .semibold, design: .monospaced))
-                Button("结束休息") { model.endBreak() }
+                timerPanel(title: "休息中", action: AnyView(
+                    Button("结束休息") { model.endBreak() }.buttonStyle(.ink)))
             case .idle:
-                if let done = model.pendingCompletion { CompletionBanner(done: done) }
+                if let done = model.pendingCompletion { CompletionBanner(done: done).inkPanel() }
             }
             if model.unsynced > 0 {
-                Text("\(model.unsynced) 条未同步").font(.caption).foregroundStyle(.orange)
+                Text("\(model.unsynced) 条未同步").font(.inkMono(11)).foregroundStyle(Ink.now)
             }
             if model.accessibilityMissing, case .focusing = model.engine.phase {
-                Text("未授权辅助功能：仅按 App 粒度采集").font(.caption).foregroundStyle(.orange)
+                Text("未授权辅助功能：仅按 App 粒度采集").font(.inkMono(11)).foregroundStyle(Ink.now)
             }
-            Text("今日：\(model.todaySessions.count) 个番茄 · \(model.todaySessions.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
-                .foregroundStyle(.secondary)
-            FocusTimelineView(sessions: model.todaySessions, tasks: model.tasks) { pickedTask = $0 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if let task = pickedTask { taskSheet(task) }
+            Text("今日　\(model.todaySessions.count) 个番茄 · \(model.todaySessions.map(\.actualSeconds).reduce(0, +) / 60) 分钟")
+                .font(.inkMono(12)).foregroundStyle(Ink.sub)
+            FocusTimelineView(sessions: model.todaySessions, tasks: model.tasks) { task in
+                withAnimation(.easeOut(duration: 0.15)) { pickedTask = task }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let task = pickedTask {
+                TaskDetailPanel(task: task,
+                                category: model.categories.first { $0.todoistProjectId == task.projectId },
+                                canStart: idle,
+                                onStart: { model.startTask(task); pickedTask = nil },
+                                onClose: { withAnimation(.easeOut(duration: 0.15)) { pickedTask = nil } })
+            }
         }
-        .padding()
+        .padding(14)
     }
 
-    /// 点击时间轴上的计划块后，在右侧底部弹出的开始面板。
-    private func taskSheet(_ task: TodoistTask) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task.content).font(.headline).lineLimit(2)
-                HStack(spacing: 6) {
-                    if let t = task.dueTime { Text(t, format: .dateTime.hour().minute()) }
-                    if let name = model.categories.first(where: { $0.todoistProjectId == task.projectId })?.name { Text(name) }
+    private func timerPanel(title: String, action: AnyView) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+            Text(AppModel.format(model.engine.remainingSeconds))
+                .font(.inkMono(56, weight: .medium)).monospacedDigit()
+            action
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .inkPanel()
+        .padding(.trailing, 3).padding(.bottom, 3)
+    }
+
+    private func row(_ text: String, color: Color?, subtitle: String?, onOpen: (() -> Void)?,
+                     start: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            CategoryMark(color: color ?? Ink.rule)
+            Button { onOpen?() } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(text).lineLimit(2).multilineTextAlignment(.leading)
+                    if let subtitle { Text(subtitle).font(.inkMono(10)).foregroundStyle(Ink.sub) }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            Spacer()
-            Button("开始专注") { model.startTask(task); pickedTask = nil }
-                .buttonStyle(.borderedProminent).disabled(!idle)
-            Button { pickedTask = nil } label: { Image(systemName: "xmark") }
-                .buttonStyle(.borderless).accessibilityLabel("关闭")
-        }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
-    private func row(_ text: String, subtitle: String?, action: @escaping () -> Void) -> some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(text).lineLimit(2)
-                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
-            }
-            Spacer()
-            Button(action: action) { Image(systemName: "play.fill") }
-                .disabled(!idle)
+            .buttonStyle(.plain).disabled(onOpen == nil)
+            Button(action: start) { Image(systemName: "play.fill").font(.system(size: 10)) }
+                .buttonStyle(.ink).disabled(!idle)
                 .accessibilityLabel("开始专注：\(text)")
         }
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Rectangle().fill(Ink.rule).frame(height: 1) }
     }
 
     private func start() {

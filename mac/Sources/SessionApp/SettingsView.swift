@@ -24,7 +24,7 @@ private struct SettingsForm: View {
             Section {
                 if store.unsynced {
                     Label("未同步：修改已保存在本机，后端暂不可达，稍后会自动重试", systemImage: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Ink.now)
                 }
                 Text("以下修改只对下一个专注 session 生效，进行中的不受影响。").font(.callout).foregroundStyle(.secondary)
             }
@@ -77,9 +77,9 @@ private struct SettingsForm: View {
             Section("后端") {
                 TextField("后端地址", text: $urlText)
                 SecureField(hasStoredToken ? "API Token（已保存，留空保持不变）" : "API Token", text: $tokenText)
-                if keychainFailed { Text("写入钥匙串失败").foregroundStyle(.red) }
+                if keychainFailed { Text("写入钥匙串失败").foregroundStyle(Ink.now) }
                 HStack {
-                    Button("保存并应用", action: saveConnection)
+                    Button("保存并应用", action: saveConnection).buttonStyle(.inkPrimary)
                     if hasStoredToken { Button("清除 Token", role: .destructive, action: clearToken) }
                 }
                 Text("环境变量 SESSION_API_URL / SESSION_API_TOKEN 若已设置，会优先于此处的值。").font(.callout).foregroundStyle(.secondary)
@@ -90,6 +90,7 @@ private struct SettingsForm: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .onAppear(perform: loadConnection)   // 只在出现时读一次；不要放进 State 初始值（每秒 tick 都会重建 View）
         .task { await model.permissions.refresh() }
     }

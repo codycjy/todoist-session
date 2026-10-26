@@ -17,8 +17,8 @@ struct StatsView: View {
                 ForEach(StatsRange.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented).labelsHidden()
-            .padding()
-            Divider()
+            .padding(14)
+            Rectangle().fill(Ink.ink).frame(height: Ink.border)
             content
         }
         .task(id: range) { await load() }
@@ -33,7 +33,7 @@ struct StatsView: View {
                 Image(systemName: "chart.bar.xaxis").font(.largeTitle).foregroundStyle(.secondary)
                 Text("暂时无法获取统计数据").font(.headline)
                 Text("请确认后端地址与 Token 已在「设置」中配置且服务可访问。")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(Ink.sub)
                 Button("重试") { Task { await load() } }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,17 +58,16 @@ struct StatsView: View {
 
     private func metric(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title.bold()).monospacedDigit()
+            Text(title).font(.inkMono(11)).foregroundStyle(Ink.sub)
+            Text(value).font(.inkMono(26, weight: .medium))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .inkPanel(shadow: false)
         .accessibilityElement(children: .combine)
     }
 
     private func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.headline); c() }
+        VStack(alignment: .leading, spacing: 8) { InkSectionHeader(text: title); c() }
     }
 
     private func dailyChart(_ s: StatsSummary) -> some View {
@@ -77,7 +76,7 @@ struct StatsView: View {
             if pts.isEmpty || s.totalFocusSeconds == 0 { empty("这段时间没有专注记录") } else {
                 Chart(pts) { p in
                     BarMark(x: .value("日期", p.date, unit: .day), y: .value("分钟", p.minutes))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Ink.ink)
                 }
                 .chartYAxisLabel("分钟")
                 .frame(height: 160)
@@ -129,10 +128,10 @@ struct StatsView: View {
                 GeometryReader { geo in
                     let total = Double(s.activeSeconds + s.idleSeconds)
                     HStack(spacing: 0) {
-                        Rectangle().fill(Color.green).frame(width: geo.size.width * Double(s.activeSeconds) / total)
-                        Rectangle().fill(Color.gray.opacity(0.5))
+                        Rectangle().fill(Ink.highlight).overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: 1)).frame(width: geo.size.width * Double(s.activeSeconds) / total)
+                        Rectangle().fill(Ink.rule)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: Ink.border))
                 }
                 .frame(height: 16)
                 Text("活跃 \(StatsFormat.duration(seconds: s.activeSeconds))（\(100 - idle)%） · 闲置 \(StatsFormat.duration(seconds: s.idleSeconds))（\(idle)%）")

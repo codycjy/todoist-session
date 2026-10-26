@@ -17,7 +17,7 @@ struct MenuPanel: View {
                 HStack {
                     TextField("快速开始：输入标题", text: $title)
                         .onSubmit(quickStart)
-                    Button("开始", action: quickStart).disabled(trimmedTitle.isEmpty)
+                    Button("开始", action: quickStart).buttonStyle(.inkPrimary).disabled(trimmedTitle.isEmpty)
                 }
                 ForEach(model.tasks.prefix(5)) { task in
                     Button { model.startTask(task) } label: {
@@ -35,6 +35,7 @@ struct MenuPanel: View {
         }
         .padding(12)
         .frame(width: 320)
+        .inkWindow()
     }
 
     @ViewBuilder private var status: some View {
@@ -42,14 +43,14 @@ struct MenuPanel: View {
         case .focusing:
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.currentTitle ?? "").font(.headline).lineLimit(2)
-                Text(AppModel.format(model.engine.remainingSeconds)).font(.system(size: 34, weight: .semibold, design: .monospaced))
-                Button("放弃（不记录）", role: .destructive) { model.abandon() }
+                Text(AppModel.format(model.engine.remainingSeconds)).font(.inkMono(34, weight: .medium))
+                Button("放弃（不记录）") { model.abandon() }.buttonStyle(.ink)
             }
         case .breaking:
             VStack(alignment: .leading, spacing: 6) {
                 Text("休息中").font(.headline)
-                Text(AppModel.format(model.engine.remainingSeconds)).font(.system(size: 34, weight: .semibold, design: .monospaced))
-                Button("结束休息") { model.endBreak() }
+                Text(AppModel.format(model.engine.remainingSeconds)).font(.inkMono(34, weight: .medium))
+                Button("结束休息") { model.endBreak() }.buttonStyle(.ink)
             }
         case .idle:
             if let done = model.pendingCompletion {
@@ -59,7 +60,7 @@ struct MenuPanel: View {
             }
         }
         if let message = model.errorMessage {
-            Text(message).font(.caption).foregroundStyle(.red)
+            Text(message).font(.caption).foregroundStyle(Ink.now)
         }
     }
 
@@ -79,8 +80,8 @@ struct CompletionBanner: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("✓ 完成：\(done.run.title)").font(.headline).lineLimit(2)
             HStack {
-                Button(model.engine.suggestedBreak == .long ? "开始长休 15 分钟" : "开始休息 5 分钟") { model.startBreak() }
-                Button("结束") { model.dismissCompletion() }.keyboardShortcut(.defaultAction)
+                Button(model.engine.suggestedBreak == .long ? "开始长休 15 分钟" : "开始休息 5 分钟") { model.startBreak() }.buttonStyle(.ink)
+                Button("结束") { model.dismissCompletion() }.buttonStyle(.inkPrimary).keyboardShortcut(.defaultAction)
             }
         }
     }

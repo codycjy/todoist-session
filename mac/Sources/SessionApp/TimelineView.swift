@@ -47,10 +47,10 @@ struct FocusTimelineView: View {
                         ForEach(hourMarks(range), id: \.self) { hour in
                             let y = hour.timeIntervalSince(range.start) / 60 * pointsPerMinute
                             Text(hour, format: .dateTime.hour().minute())
-                                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                                .font(.inkMono(10)).foregroundStyle(Ink.sub)
                                 .frame(width: gutter - 6, alignment: .trailing)
                                 .offset(y: y - 7)
-                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 0.5)
+                            Rectangle().fill(Ink.rule).frame(height: 1)
                                 .padding(.leading, gutter).offset(y: y)
                         }
                         ForEach(scheduled, id: \.task.id) { item in
@@ -66,7 +66,7 @@ struct FocusTimelineView: View {
                                 .frame(width: columnWidth)
                                 .offset(x: gutter + 10 + columnWidth, y: block.top)
                         }
-                        Rectangle().fill(Color.red).frame(height: 1)
+                        Rectangle().fill(Ink.now).frame(height: 1.5)
                             .padding(.leading, gutter - 4)
                             .offset(y: nowY)
                             .accessibilityHidden(true)
@@ -86,16 +86,20 @@ struct FocusTimelineView: View {
             .map { Color(todoistColor: $0.color) } ?? .gray
         return VStack(alignment: .leading, spacing: 0) {
             if height >= Self.compactHeight {
-                Text(task.content).font(.caption).lineLimit(height >= 36 ? 2 : 1)
+                HStack(alignment: .top, spacing: 5) {
+                    CategoryMark(color: color, size: 7).padding(.top, 3)
+                    Text(task.content).font(.caption.weight(.medium)).lineLimit(height >= 36 ? 2 : 1)
+                }
                 if height >= 40, let t = task.dueTime {
-                    Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.secondary)
+                    Text(t, format: .dateTime.hour().minute()).font(.inkMono(10)).foregroundStyle(Ink.sub)
                 }
             }
         }
         .padding(.horizontal, 6).padding(.vertical, height >= Self.compactHeight ? 3 : 0)
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
-        .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
-        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .foregroundStyle(Ink.ink)
+        .background(Ink.paper)
+        .overlay(Rectangle().strokeBorder(Ink.ink, style: StrokeStyle(lineWidth: Ink.border, dash: [4, 3])))
         .contentShape(Rectangle().inset(by: -4))
         .help("Todoist 计划：\(task.content)")
     }
@@ -117,10 +121,13 @@ struct FocusTimelineView: View {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 0) {
                     if block.height >= Self.compactHeight {
-                        Text(session.title).font(.caption).lineLimit(1)
+                        HStack(spacing: 5) {
+                            CategoryMark(color: color, size: 7)
+                            Text(session.title).font(.caption.weight(.semibold)).lineLimit(1)
+                        }
                     }
                     if block.height >= 36 {
-                        Text("\(session.actualSeconds / 60) 分钟").font(.caption2).opacity(0.8)
+                        Text("\(session.actualSeconds / 60) 分钟").font(.inkMono(10)).opacity(0.75)
                     }
                 }
                 .padding(.horizontal, 6).padding(.vertical, block.height >= Self.compactHeight ? 3 : 0)
@@ -129,13 +136,14 @@ struct FocusTimelineView: View {
                     Image(systemName: "icloud.slash").font(.caption2).padding(3)
                         .help("未同步").accessibilityLabel("未同步")
                 } else if let badge = EvaluationDisplay.badge(for: model.evaluations[session.id]) {
-                    Text(badge).font(.caption2.bold()).monospacedDigit().padding(3)
+                    Text(badge).font(.inkMono(10, weight: .semibold)).padding(3)
                         .help("专注度评分").accessibilityLabel("专注度 \(badge)")
                 }
             }
             .frame(height: block.height)
-            .foregroundStyle(.white)
-            .background(color.opacity(0.85), in: RoundedRectangle(cornerRadius: 5))
+            .foregroundStyle(Ink.onHighlight)
+            .background(Ink.highlight)
+            .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: Ink.border))
             .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(.plain)
@@ -170,7 +178,7 @@ private struct SessionDetail: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(spans) { span in
                             Text(line(span)).font(.caption).monospacedDigit().lineLimit(2)
-                                .foregroundStyle(span.wasBlocked ? Color.red : span.kind == .idle ? Color.gray : Color.primary)
+                                .foregroundStyle(span.wasBlocked ? Ink.now : span.kind == .idle ? Ink.sub : Ink.ink)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
