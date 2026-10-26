@@ -12,6 +12,7 @@ struct TodayView: View {
     /// 时间轴上点开的专注块；与选中任务互斥，底部同一时间只有一个详情面板。
     @State private var selectedSessionId: String? = DemoData.selectedSessionId
     @FocusState private var composerFocused: Bool
+    @AppStorage("layout.timelineWidth") private var timelineWidth = 340.0
 
     private var idle: Bool { model.engine.phase == .idle }
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -36,8 +37,8 @@ struct TodayView: View {
     var body: some View {
         HStack(spacing: 0) {
             page.frame(minWidth: 460, maxWidth: .infinity)
-            Rectangle().fill(Ink.rule).frame(width: 1)
-            dayColumn.frame(width: 340)
+            ResizeHandle(width: $timelineWidth, range: 260...560, grows: -1)
+            dayColumn.frame(width: timelineWidth)
         }
         .task { await model.refreshEvaluations() }
     }

@@ -24,6 +24,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @State private var showGuide = !UserDefaults.standard.bool(forKey: PermissionGuide.flagKey) && !DemoData.enabled
+    @AppStorage("layout.sidebarWidth") private var sidebarWidth = 200.0
     @State private var route: Route = {
         switch DemoData.initialTab {
         case "stats": .stats
@@ -40,8 +41,8 @@ struct MainView: View {
     var body: some View {
         HStack(spacing: 0) {
             Sidebar(route: $route)
-                .frame(width: 200)
-            Rectangle().fill(Ink.rule).frame(width: 1)
+                .frame(width: sidebarWidth)
+            ResizeHandle(width: $sidebarWidth, range: 160...320)
             ZStack {
                 if DemoData.initialTab == "menu" {
                     // 仅演示截图：把菜单栏面板放进主窗口渲染。

@@ -214,3 +214,33 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+/// 可拖动的竖分隔线：1px 细线 + 两侧加宽的拖动区域，悬停显示左右调整光标。
+/// `width` 是被调整那一栏的宽度；`grows` 为 1 表示向右拖变宽（左栏），-1 表示向左拖变宽（右栏）。
+struct ResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    var grows: Double = 1
+    @State private var start: Double?
+    @State private var hovering = false
+
+    var body: some View {
+        Rectangle().fill(hovering || start != nil ? Ink.ink.opacity(0.5) : Ink.rule)
+            .frame(width: 1)
+            .overlay {
+                Color.clear.frame(width: 9).contentShape(Rectangle())
+                    .onHover { inside in
+                        hovering = inside
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { g in
+                            let base = start ?? width
+                            if start == nil { start = width }
+                            width = min(max(base + grows * g.translation.width, range.lowerBound), range.upperBound)
+                        }
+                        .onEnded { _ in start = nil })
+            }
+            .zIndex(10)
+    }
+}
