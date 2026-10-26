@@ -361,7 +361,7 @@ private struct FocusCard: View {
                 .buttonStyle(.inkPrimary)
                 .help("现在结束并记录这次专注，休息时长不变")
                 Spacer()
-                Button("放弃（不记录）") { model.abandon() }.buttonStyle(.inkQuiet).foregroundStyle(Ink.sub)
+                Button("放弃") { model.abandon() }.buttonStyle(.ink).help("放弃这次专注，不记录")
             }
             if model.accessibilityMissing {
                 Text("未授权辅助功能：只按 App 记录").font(.inkMono(10)).foregroundStyle(Ink.now)

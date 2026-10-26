@@ -56,8 +56,8 @@ struct MenuPanel: View {
                     FocusAdjustButtons(compact: true)
                     Button("提前完成") { model.finishEarly() }.buttonStyle(InkButtonStyle(kind: .primary, compact: true))
                     Spacer()
-                    Button("放弃") { model.abandon() }.buttonStyle(.inkQuiet).foregroundStyle(Ink.sub)
-                        .help("放弃（不记录）")
+                    Button("放弃") { model.abandon() }.buttonStyle(InkButtonStyle(compact: true))
+                        .help("放弃这次专注，不记录")
                 }
             }
         case .breaking:
