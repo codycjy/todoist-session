@@ -27,7 +27,7 @@ struct SessionApp: App {
         MenuBarExtra {
             MenuPanel().environmentObject(model).font(.ink(13))
         } label: {
-            MenuBarLabel(title: model.menuTitle)
+            MenuBarLabel(icon: model.menuLabel.icon, text: model.menuLabel.text)
         }
         .menuBarExtraStyle(.window)
 
@@ -39,13 +39,32 @@ struct SessionApp: App {
     }
 }
 
-/// 菜单栏标题。演示模式下启动即打开主窗口（正常使用时由用户从菜单打开）。
+/// 菜单栏标题。MenuBarExtra 的 label 不认字体修饰，所以先渲染成模板图：
+/// 等宽字体保证数字跳动时宽度不变，模板图自动跟随菜单栏深浅色。
+/// 演示模式下启动即打开主窗口（正常使用时由用户从菜单打开）。
 private struct MenuBarLabel: View {
-    let title: String
+    let icon: String
+    let text: String
     @Environment(\.openWindow) private var openWindow
 
+    private var rendered: NSImage? {
+        let content = HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 13, weight: .medium))
+            if !text.isEmpty { Text(text).font(.inkMono(13, weight: .medium)) }
+        }
+        .foregroundStyle(.black)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        let image = renderer.nsImage
+        image?.isTemplate = true
+        return image
+    }
+
     var body: some View {
-        Text(title).onAppear {
+        Group {
+            if let rendered { Image(nsImage: rendered) } else { Text(text.isEmpty ? "Session" : text) }
+        }
+        .onAppear {
             guard DemoData.enabled else { return }
             if let a = DemoData.appearance { NSApp.appearance = NSAppearance(named: a) }
             openWindow(id: "main")

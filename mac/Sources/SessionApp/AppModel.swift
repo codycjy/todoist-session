@@ -32,6 +32,7 @@ final class AppModel: ObservableObject {
     private nonisolated(unsafe) var activationObserver: NSObjectProtocol?
 
     private let store: LocalStore?
+    private let defaults: UserDefaults
     private var tracker: ActivityTracker?
     private var sync: SyncService?
     private var askedAccessibility = false
@@ -59,7 +60,9 @@ final class AppModel: ObservableObject {
                                                     blockApps: ["com.apple.Music"], blockDomains: ["news.ycombinator.com"])]
             defaults.set(try? JSONEncoder().encode(coding), forKey: "settings.profiles")
         }
-        engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore(defaults: defaults))
+        self.defaults = defaults
+        engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore(defaults: defaults),
+                             autoFinish: defaults.bool(forKey: Self.autoFinishKey))
         settings = SettingsStore(defaults: defaults, env: env)
         api = demo ? nil : Self.makeAPI(env: env)
         settings.remote = api
@@ -83,6 +86,15 @@ final class AppModel: ObservableObject {
         engine.onCompleted = { [weak self] done in
             // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
             Task { @MainActor in self?.complete(done, live: true) }
+        }
+        engine.onTimeUp = { phase in
+            Task { @MainActor in
+                switch phase {
+                case .focusing(let run): Notifier.post("时间到：\(run.title)", body: "点「完成」记录这次专注")
+                case .breaking: Notifier.post("休息时间到", body: "点「结束休息」回到今日")
+                case .idle: break
+                }
+            }
         }
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -161,12 +173,27 @@ final class AppModel: ObservableObject {
 
     // MARK: 展示
 
-    var menuTitle: String {
+    /// 菜单栏：SF Symbol + 计时文字（空闲时无文字）。
+    var menuLabel: (icon: String, text: String) {
         switch engine.phase {
-        case .idle: return pendingCompletion == nil ? "🍅" : "🍅 ✓"
-        case .focusing: return "🍅 " + Self.format(engine.remainingSeconds)
-        case .breaking: return "☕ " + Self.format(engine.remainingSeconds)
+        case .idle: return (pendingCompletion == nil ? "timer" : "checkmark.circle", "")
+        case .focusing: return ("timer", timerText)
+        case .breaking: return ("cup.and.saucer", timerText)
         }
+    }
+
+    /// 剩余时间；到点后（手动结束模式）显示 +超时。
+    var timerText: String {
+        isOvertime ? "+" + Self.format(engine.overtimeSeconds) : Self.format(engine.remainingSeconds)
+    }
+
+    var isOvertime: Bool { engine.phase != .idle && engine.remainingSeconds == 0 }
+
+    static let autoFinishKey = "timer.autoFinish"
+    /// 到点是否自动结束专注/休息。默认关：停在原处计超时，手动完成。
+    var autoFinish: Bool {
+        get { engine.autoFinish }
+        set { engine.autoFinish = newValue; defaults.set(newValue, forKey: Self.autoFinishKey); objectWillChange.send() }
     }
 
     var currentTitle: String? { currentRun?.title }
@@ -385,7 +412,7 @@ final class AppModel: ObservableObject {
         do { try store?.save(SessionRecord(done)) }
         catch { errorMessage = "保存专注记录失败：\(error.localizedDescription)" }
         pendingCompletion = done
-        if live && notify { Notifier.focusCompleted(title: done.run.title) }
+        if live && notify { Notifier.post("专注完成：\(done.run.title)，休息一下") }
         reloadToday()
         objectWillChange.send()
         Task { await flushSync() }

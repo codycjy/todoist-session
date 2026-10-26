@@ -69,6 +69,14 @@ private struct SettingsForm: View {
                 Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")
                     .font(.ink(12.5)).foregroundStyle(Ink.sub)
             }
+            row("到点", hint: "专注或休息的倒计时走完时") {
+                VStack(alignment: .leading, spacing: 6) {
+                    InkToggle(isOn: Binding(get: { model.autoFinish }, set: { model.autoFinish = $0 }), label: "自动结束")
+                    Text(model.autoFinish ? "到点直接记录专注 / 结束休息。"
+                                          : "到点只发通知，计时继续显示超时（+mm:ss），需要手动点「完成」或「结束休息」；超时计入实际时长。")
+                        .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             row("快捷指令", hint: "开始时运行 session_start，结束时运行 session_end") {
                 VStack(alignment: .leading, spacing: 6) {
                     InkToggle(isOn: $shortcutsEnabled, label: "运行快捷指令")

@@ -337,7 +337,7 @@ private struct FocusCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Rectangle().fill(Ink.highlight).frame(width: 8, height: 8)
-                Text("专注中").font(.inkMono(11, weight: .semibold)).tracking(1.2)
+                Text(model.isOvertime ? "已超时" : "专注中").font(.inkMono(11, weight: .semibold)).tracking(1.2)
                 if let cat {
                     Text("·").foregroundStyle(Ink.faint)
                     CategoryMark(color: Color(todoistColor: cat.color), size: 7)
@@ -348,7 +348,8 @@ private struct FocusCard: View {
             }
             Text(run.title).font(.ink(28, weight: .semibold)).lineLimit(2)
             // 数字先按很大的字号排，再按卡片剩余的宽高缩到刚好放下。
-            Text(AppModel.format(remaining))
+            Text(model.timerText)
+                .foregroundStyle(model.isOvertime ? Ink.now : Ink.ink)
                 .font(.ink(320, weight: .regular))
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.15)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -356,10 +357,10 @@ private struct FocusCard: View {
             HStack(spacing: 8) {
                 FocusAdjustButtons()
                 Button { model.finishEarly() } label: {
-                    HStack(spacing: 5) { Image(systemName: "checkmark").font(.ink(10, weight: .bold)); Text("提前完成") }
+                    HStack(spacing: 5) { Image(systemName: "checkmark").font(.ink(10, weight: .bold)); Text(model.isOvertime ? "完成" : "提前完成") }
                 }
                 .buttonStyle(.inkPrimary)
-                .help("现在结束并记录这次专注，休息时长不变")
+                .help(model.isOvertime ? "结束并记录这次专注（含超时）" : "现在结束并记录这次专注，休息时长不变")
                 Spacer()
                 Button("放弃") { model.abandon() }.buttonStyle(.ink).help("放弃这次专注，不记录")
             }
@@ -408,8 +409,9 @@ private struct BreakCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("休息中").font(.inkMono(11, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.sub)
-            Text(AppModel.format(model.engine.remainingSeconds))
+            Text(model.timerText)
                 .font(.ink(72, weight: .regular)).monospacedDigit()
+                .foregroundStyle(model.isOvertime ? Ink.now : Ink.ink)
             Button("结束休息") { model.endBreak() }.buttonStyle(.ink)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

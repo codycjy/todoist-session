@@ -49,12 +49,13 @@ struct MenuPanel: View {
     @ViewBuilder private var status: some View {
         switch model.engine.phase {
         case .focusing(let run):
-            timerBlock(eyebrow: "专注中", title: run.title, categoryId: run.categoryId,
+            timerBlock(eyebrow: model.isOvertime ? "已超时" : "专注中", title: run.title, categoryId: run.categoryId,
                        progress: 1 - Double(model.engine.remainingSeconds) / Double(max(run.plannedSeconds, 1)),
                        minutes: run.plannedSeconds / 60) {
                 HStack(spacing: 6) {
                     FocusAdjustButtons(compact: true)
-                    Button("提前完成") { model.finishEarly() }.buttonStyle(InkButtonStyle(kind: .primary, compact: true))
+                    Button(model.isOvertime ? "完成" : "提前完成") { model.finishEarly() }
+                        .buttonStyle(InkButtonStyle(kind: .primary, compact: true))
                     Spacer()
                     Button("放弃") { model.abandon() }.buttonStyle(InkButtonStyle(compact: true))
                         .help("放弃这次专注，不记录")
@@ -99,8 +100,9 @@ struct MenuPanel: View {
                 }
             }
             if let title { Text(title).font(.ink(14, weight: .semibold)).lineLimit(2) }
-            Text(AppModel.format(model.engine.remainingSeconds))
+            Text(model.timerText)
                 .font(.ink(46, weight: .regular)).monospacedDigit()
+                .foregroundStyle(model.isOvertime ? Ink.now : Ink.ink)
             if let progress { ProgressRule(progress: progress, minutes: minutes) }
             actions()
         }

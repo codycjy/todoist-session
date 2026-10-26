@@ -253,4 +253,64 @@ final class TimerEngineTests: XCTestCase {
         XCTAssertEqual(callbacks, 0)
         XCTAssertNil(engine.finishEarly())
     }
+
+    // MARK: 手动结束（autoFinish = false）
+
+    func testManualModeKeepsFocusingPastEndAndCountsOvertime() throws {
+        let engine = TimerEngine(clock: clock, store: store, autoFinish: false)
+        var completed = 0, timeUps: [TimerPhase] = []
+        engine.onCompleted = { _ in completed += 1 }
+        engine.onTimeUp = { timeUps.append($0) }
+        try engine.start(spec(seconds: 600))
+        clock.advance(600); engine.tick()
+        clock.advance(90); engine.tick()
+        guard case .focusing = engine.phase else { return XCTFail("should still be focusing") }
+        XCTAssertEqual(engine.remainingSeconds, 0)
+        XCTAssertEqual(engine.overtimeSeconds, 90)
+        XCTAssertEqual(completed, 0)
+        XCTAssertEqual(timeUps.count, 1, "time-up fires once")
+        let done = try XCTUnwrap(engine.finishEarly())
+        XCTAssertEqual(done.actualSeconds, 690, "overtime counts as actual focus")
+        XCTAssertEqual(engine.overtimeSeconds, 0)
+    }
+
+    func testManualModeKeepsBreakingPastEnd() throws {
+        let engine = TimerEngine(clock: clock, store: store, autoFinish: false)
+        var timeUps = 0
+        engine.onTimeUp = { _ in timeUps += 1 }
+        try engine.startBreak(.short, seconds: 300)
+        clock.advance(400); engine.tick(); engine.tick()
+        guard case .breaking = engine.phase else { return XCTFail("should still be breaking") }
+        XCTAssertEqual(engine.overtimeSeconds, 100)
+        XCTAssertEqual(timeUps, 1)
+        engine.endBreak()
+        XCTAssertEqual(engine.phase, .idle)
+    }
+
+    func testManualModeRelaunchPastEndDoesNotRecoverOrRenotify() throws {
+        let first = TimerEngine(clock: clock, store: store, autoFinish: false)
+        try first.start(spec(seconds: 600))
+        clock.advance(900)
+        let engine = TimerEngine(clock: clock, store: store, autoFinish: false)
+        var timeUps = 0
+        engine.onTimeUp = { _ in timeUps += 1 }
+        engine.tick()
+        XCTAssertNil(engine.recovered)
+        guard case .focusing = engine.phase else { return XCTFail("should still be focusing") }
+        XCTAssertEqual(engine.overtimeSeconds, 300)
+        XCTAssertEqual(timeUps, 0)
+    }
+
+    func testAddingTimeDuringOvertimeRearmsTimeUp() throws {
+        let engine = TimerEngine(clock: clock, store: store, autoFinish: false)
+        var timeUps = 0
+        engine.onTimeUp = { _ in timeUps += 1 }
+        try engine.start(spec(seconds: 600))
+        clock.advance(620); engine.tick()
+        XCTAssertTrue(engine.adjust(by: 300))
+        XCTAssertEqual(engine.overtimeSeconds, 0)
+        XCTAssertEqual(engine.remainingSeconds, 280)
+        clock.advance(280); engine.tick()
+        XCTAssertEqual(timeUps, 2)
+    }
 }
