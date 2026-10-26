@@ -13,6 +13,8 @@ struct FocusTimelineView: View {
     private let pointsPerMinute = 1.4
     private let gutter: CGFloat = 48
     private let defaultTaskMinutes = 30.0
+    /// 低于此高度的块只画一条细条（标题放进 tooltip），否则文字会撑出块外。
+    private static let compactHeight: Double = 18
 
     private var scheduled: [(task: TodoistTask, interval: DateInterval)] {
         let cal = Calendar.current
@@ -83,15 +85,18 @@ struct FocusTimelineView: View {
         let color = model.categories.first { $0.todoistProjectId == task.projectId }
             .map { Color(todoistColor: $0.color) } ?? .gray
         return VStack(alignment: .leading, spacing: 0) {
-            Text(task.content).font(.caption).lineLimit(height >= 36 ? 2 : 1)
-            if height >= 40, let t = task.dueTime {
-                Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.secondary)
+            if height >= Self.compactHeight {
+                Text(task.content).font(.caption).lineLimit(height >= 36 ? 2 : 1)
+                if height >= 40, let t = task.dueTime {
+                    Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.horizontal, 6).padding(.vertical, 3)
+        .padding(.horizontal, 6).padding(.vertical, height >= Self.compactHeight ? 3 : 0)
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
         .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .contentShape(Rectangle().inset(by: -4))
         .help("Todoist 计划：\(task.content)")
     }
 
@@ -111,12 +116,14 @@ struct FocusTimelineView: View {
         return Button { selected = session.id } label: {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(session.title).font(.caption).lineLimit(1)
+                    if block.height >= Self.compactHeight {
+                        Text(session.title).font(.caption).lineLimit(1)
+                    }
                     if block.height >= 36 {
                         Text("\(session.actualSeconds / 60) 分钟").font(.caption2).opacity(0.8)
                     }
                 }
-                .padding(.horizontal, 6).padding(.vertical, 3)
+                .padding(.horizontal, 6).padding(.vertical, block.height >= Self.compactHeight ? 3 : 0)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 if session.syncState == .pending {
                     Image(systemName: "icloud.slash").font(.caption2).padding(3)
@@ -129,8 +136,10 @@ struct FocusTimelineView: View {
             .frame(height: block.height)
             .foregroundStyle(.white)
             .background(color.opacity(0.85), in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(.plain)
+        .help("\(session.title) · \(session.actualSeconds / 60) 分钟")
         .popover(isPresented: Binding(get: { selected == session.id },
                                       set: { if !$0 { selected = nil } })) {
             SessionDetail(session: session, spans: model.spans(for: session.id),

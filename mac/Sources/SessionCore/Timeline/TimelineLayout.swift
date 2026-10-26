@@ -3,7 +3,7 @@ import Foundation
 public struct TimelineBlock: Equatable, Identifiable, Sendable {
     public let id: String
     public let top: Double      // 距时间轴起点的 pt
-    public let height: Double   // 至少 minHeight，保证短 session 也能点到
+    public let height: Double   // 至少 minHeight（约 7 分钟的视觉高度），避免 1 分钟的块看起来像 15 分钟
 }
 
 public enum TimelineLayout {
@@ -23,13 +23,13 @@ public enum TimelineLayout {
 
     /// 任意时间区间在时间轴上的位置（Todoist 计划块用）。
     public static func block(for interval: DateInterval, rangeStart: Date, pointsPerMinute: Double = 1.4,
-                             minHeight: Double = 22) -> (top: Double, height: Double) {
+                             minHeight: Double = 10) -> (top: Double, height: Double) {
         (interval.start.timeIntervalSince(rangeStart) / 60 * pointsPerMinute,
          max(minHeight, interval.duration / 60 * pointsPerMinute))
     }
 
     public static func blocks(sessions: [SessionRecord], rangeStart: Date, pointsPerMinute: Double = 1.4,
-                              minHeight: Double = 22) -> [TimelineBlock] {
+                              minHeight: Double = 10) -> [TimelineBlock] {
         sessions.map { s in
             let top = s.startedAt.timeIntervalSince(rangeStart) / 60 * pointsPerMinute
             let height = max(minHeight, s.endedAt.timeIntervalSince(s.startedAt) / 60 * pointsPerMinute)

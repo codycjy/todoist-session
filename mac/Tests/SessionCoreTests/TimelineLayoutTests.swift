@@ -57,7 +57,7 @@ final class TimelineLayoutTests: XCTestCase {
 
     func testVeryShortSessionGetsMinHeight() {
         let s = session("a", from: date(10, 0), to: date(10, 0, 10))
-        XCTAssertEqual(TimelineLayout.blocks(sessions: [s], rangeStart: date(10, 0))[0].height, 22, accuracy: 0.001)
+        XCTAssertEqual(TimelineLayout.blocks(sessions: [s], rangeStart: date(10, 0))[0].height, 10, accuracy: 0.001)
     }
 
     func testBlockOrderMatchesInput() {
