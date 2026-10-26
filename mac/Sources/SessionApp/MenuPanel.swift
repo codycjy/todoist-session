@@ -70,19 +70,3 @@ struct MenuPanel: View {
         title = ""
     }
 }
-
-/// 完成后的默认动作是「结束」（回到空闲）；休息是可选项。没有评分/复盘。
-struct CompletionBanner: View {
-    @EnvironmentObject var model: AppModel
-    let done: CompletedFocus
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("✓ 完成：\(done.run.title)").font(.headline).lineLimit(2)
-            HStack {
-                Button(model.engine.suggestedBreak == .long ? "开始长休 15 分钟" : "开始休息 5 分钟") { model.startBreak() }.buttonStyle(.ink)
-                Button("结束") { model.dismissCompletion() }.buttonStyle(.inkPrimary).keyboardShortcut(.defaultAction)
-            }
-        }
-    }
-}

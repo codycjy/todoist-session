@@ -1,82 +1,114 @@
 import SwiftUI
 import SessionCore
 
-/// 点开 Todoist 任务后底部弹出的完整详情：标题不截断、元信息、描述可滚动，顶部即可开始。
+/// 点开 Todoist 任务后从底部弹出的详情：标题不截断、元信息、标签、描述（可滚动），选时长后开始。
 struct TaskDetailPanel: View {
     let task: TodoistTask
     let category: Category?
     let canStart: Bool
-    let onStart: () -> Void
+    let defaultMinutes: Int
+    /// 参数是选定的专注秒数。
+    let onStart: (Int) -> Void
     let onClose: () -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                if let category { CategoryMark(color: Color(todoistColor: category.color), size: 10).padding(.top, 5) }
-                Text(task.content).font(.system(size: 15, weight: .semibold))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: onClose) { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).foregroundStyle(Ink.sub).accessibilityLabel("关闭")
-            }
+    @State private var minutes: Int?
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    metaGrid
-                    if !task.labels.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(task.labels, id: \.self) { label in
-                                Text("@\(label)").font(.inkMono(11))
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: 1))
-                            }
-                        }
-                    }
-                    if !task.description.isEmpty {
-                        InkSectionHeader(text: "描述")
-                        Text(Self.markdown(task.description)).font(.callout)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+    private var options: [Int] {
+        var o = [15, 25, 45, 60, defaultMinutes]
+        if let d = task.durationMinutes, d > 0 { o.append(d) }
+        return Array(Set(o)).sorted()
+    }
+    private var chosen: Int { minutes ?? (task.durationMinutes.flatMap { $0 > 0 ? $0 : nil } ?? defaultMinutes) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if let category {
+                    HStack(spacing: 5) {
+                        CategoryMark(color: Color(todoistColor: category.color), size: 7)
+                        Text(category.name).font(.inkMono(11)).foregroundStyle(Ink.sub)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 220)
-
-            HStack {
-                Button("开始专注", action: onStart).buttonStyle(.inkPrimary).disabled(!canStart)
-                if let url = task.url.flatMap(URL.init(string:)) {
-                    Link("在 Todoist 打开", destination: url).font(.callout)
+                if task.priority >= 2 {
+                    Text("P\(5 - task.priority)").font(.inkMono(11, weight: .bold))
+                        .foregroundStyle(task.priority == 4 ? Ink.now : Ink.sub)
                 }
                 Spacer()
-                if !canStart { Text("专注进行中").font(.caption).foregroundStyle(Ink.sub) }
+                if let url = task.url.flatMap(URL.init(string:)) {
+                    Link(destination: url) {
+                        HStack(spacing: 3) { Text("Todoist"); Image(systemName: "arrow.up.right") }
+                            .font(.inkMono(11)).foregroundStyle(Ink.sub)
+                    }
+                }
+                Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(Ink.sub)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("关闭")
+            }
+
+            Text(task.content).font(.system(size: 19, weight: .semibold))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 18) {
+                fact("截止", dueText ?? "无")
+                fact("时长", task.durationMinutes.map { "\($0) 分钟" } ?? "未设置")
+                if task.isRecurring { fact("重复", "是") }
+                if task.parentId != nil { fact("类型", "子任务") }
+            }
+
+            if !task.labels.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(task.labels, id: \.self) { label in
+                        Text("@\(label)").font(.inkMono(11))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .overlay(Rectangle().strokeBorder(Ink.rule, lineWidth: 1))
+                    }
+                }
+            }
+
+            if !task.description.isEmpty {
+                // 按内容高度显示；很长的描述截到 8 行，完整内容去 Todoist 看。
+                description.lineLimit(8)
+                .padding(10)
+                .background(Ink.paper)
+                .overlay(Rectangle().strokeBorder(Ink.ruleSoft, lineWidth: 1))
+            }
+
+            Rectangle().fill(Ink.rule).frame(height: 1)
+            HStack(spacing: 6) {
+                ForEach(options, id: \.self) { m in InkChip(text: "\(m)m", selected: m == chosen) { minutes = m } }
+                Spacer(minLength: 8)
+                if !canStart { Text("专注进行中").font(.inkMono(10)).foregroundStyle(Ink.sub) }
+                Button { onStart(chosen * 60) } label: {
+                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.system(size: 10)); Text("开始专注 \(chosen) 分钟") }
+                }
+                .buttonStyle(.inkPrimary).disabled(!canStart)
             }
         }
-        .inkPanel()
-        .padding(.trailing, 3).padding(.bottom, 3)   // 给硬阴影留位置
+        .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+        .onChange(of: task.id) { _, _ in minutes = nil }
     }
 
-    private var metaGrid: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
-            if let category { metaRow("项目", category.name) }
-            if let due = dueText { metaRow("截止", due) }
-            if let m = task.durationMinutes { metaRow("时长", "\(m) 分钟") }
-            metaRow("优先级", "P\(max(1, 5 - task.priority))")
-            if task.isRecurring { metaRow("重复", "是") }
-            if task.parentId != nil { metaRow("类型", "子任务") }
-        }
+    private var description: some View {
+        Text(Self.markdown(task.description)).font(.system(size: 13)).lineSpacing(3)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func metaRow(_ name: String, _ value: String) -> some View {
-        GridRow {
-            Text(name).font(.inkMono(11)).foregroundStyle(Ink.sub)
-            Text(value).font(.system(size: 12))
+    private func fact(_ name: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.inkMono(10)).foregroundStyle(Ink.faint)
+            Text(value).font(.inkMono(12))
         }
     }
 
     private var dueText: String? {
-        if let t = task.dueTime { return t.formatted(.dateTime.month().day().hour().minute()) }
+        if let t = task.dueTime {
+            return Calendar.current.isDateInToday(t) ? "今天 \(Ink.hm(t))" : "\(t.formatted(.dateTime.month().day())) \(Ink.hm(t))"
+        }
         return task.dueDate
     }
 

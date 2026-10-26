@@ -41,24 +41,32 @@ final class AppModel: ObservableObject {
     private var focusSeconds: Int { settings.effective.focusSeconds }
 
     init() {
-        engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore())
         let env = ProcessInfo.processInfo.environment
-        settings = SettingsStore(defaults: .standard, env: env)
-        api = Self.makeAPI(env: env)
+        let demo = DemoData.enabled
+        // 演示模式用独立的 UserDefaults，不碰真实的计时状态与设置。
+        let defaults = demo ? (UserDefaults(suiteName: "session.demo") ?? .standard) : .standard
+        if demo {
+            defaults.removePersistentDomain(forName: "session.demo")
+            defaults.set(["com.tencent.xinWeChat", "com.hnc.Discord"], forKey: "settings.blockApps")
+            defaults.set(["youtube.com", "bilibili.com", "x.com"], forKey: "settings.blockDomains")
+        }
+        engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore(defaults: defaults))
+        settings = SettingsStore(defaults: defaults, env: env)
+        api = demo ? nil : Self.makeAPI(env: env)
         settings.remote = api
-        if api == nil { errorMessage = Self.noTokenMessage }
+        if api == nil && !demo { errorMessage = Self.noTokenMessage }
 
-        let dbPath = env["SESSION_DB_PATH"] ?? Self.defaultDBPath()
+        let dbPath: String? = demo ? nil : (env["SESSION_DB_PATH"] ?? Self.defaultDBPath())
         store = try? LocalStore(path: dbPath)
         if store == nil { errorMessage = "无法打开本地数据库，专注记录不会保存" }
-        tracker = Self.makeTracker(store: store, settings: settings.effective)
+        tracker = demo ? nil : Self.makeTracker(store: store, settings: settings.effective)
         if let store, let api { sync = SyncService(store: store, uploader: api) } else { sync = nil }
 
         // 恢复路径：没有 tracker 运行，spans 仅保留已落盘部分；完成记录照常保存。
         if let recovered = engine.recovered {
             tracker?.closeRecovered(run: recovered.run, at: recovered.endedAt)
             complete(recovered, live: false)
-        } else if case .idle = engine.phase {
+        } else if !demo, case .idle = engine.phase {
             // 上次异常退出时可能留下被重定向的标签页；有进行中的 session 时不能还原。
             Browser.restoreAll()
         }
@@ -80,6 +88,7 @@ final class AppModel: ObservableObject {
             startSampling()
         }
         try? store?.pruneOrphanSpans(keeping: activeId)
+        if demo { loadDemo() }
         reloadToday()
 
         let syncT = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
@@ -150,8 +159,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var currentTitle: String? {
-        if case .focusing(let run) = engine.phase { return run.title }
+    var currentTitle: String? { currentRun?.title }
+
+    var currentRun: FocusRun? {
+        if case .focusing(let run) = engine.phase { return run }
         return nil
     }
 
@@ -166,23 +177,27 @@ final class AppModel: ObservableObject {
 
     // MARK: 动作（只有显式点击/提交才会开始专注）
 
-    func startTask(_ task: TodoistTask) {
+    /// 设置里的默认专注时长（秒），开始面板用它预选时长。
+    var defaultFocusSeconds: Int { focusSeconds }
+
+    /// `seconds` 为 nil 时用设置里的专注时长。
+    func startTask(_ task: TodoistTask, seconds: Int? = nil) {
         let categoryId = categories.first { $0.todoistProjectId == task.projectId }?.id
         begin(FocusSpec(title: task.content, categoryId: categoryId, source: .todoist,
-                        todoistTaskId: task.id, entryId: nil, plannedSeconds: focusSeconds))
+                        todoistTaskId: task.id, entryId: nil, plannedSeconds: seconds ?? focusSeconds))
     }
 
-    func startEntry(_ entry: Entry) {
+    func startEntry(_ entry: Entry, seconds: Int? = nil) {
         let started = begin(FocusSpec(title: entry.title, categoryId: entry.categoryId, source: .custom,
-                                      todoistTaskId: nil, entryId: entry.id, plannedSeconds: focusSeconds))
+                                      todoistTaskId: nil, entryId: entry.id, plannedSeconds: seconds ?? focusSeconds))
         if started { remember(title: entry.title, categoryId: entry.categoryId) }
     }
 
-    func startCustom(title: String, categoryId: String?) {
+    func startCustom(title: String, categoryId: String?, seconds: Int? = nil) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let started = begin(FocusSpec(title: title, categoryId: categoryId, source: .custom,
-                                      todoistTaskId: nil, entryId: nil, plannedSeconds: focusSeconds))
+                                      todoistTaskId: nil, entryId: nil, plannedSeconds: seconds ?? focusSeconds))
         if started { remember(title: title, categoryId: categoryId) }
     }
 
@@ -303,6 +318,7 @@ final class AppModel: ObservableObject {
             try engine.start(spec); pendingCompletion = nil
             if case .focusing(let run) = engine.phase {
                 // 此时没有运行中的 tracker（engine.start 已确认空闲），按最新设置重建。
+                guard !DemoData.enabled else { return true }
                 tracker = Self.makeTracker(store: store, settings: settings.effective)
                 tracker?.start(run: run); startSampling()
             }
@@ -360,6 +376,15 @@ final class AppModel: ObservableObject {
         let start = Calendar.current.startOfDay(for: Date())
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         todaySessions = (try? store?.sessions(from: start, to: end)) ?? []
+    }
+
+    private func loadDemo() {
+        let now = Date()
+        categories = DemoData.categories; allCategories = DemoData.categories
+        entries = DemoData.entries; tasks = DemoData.tasks(now: now)
+        for s in DemoData.sessions(now: now) { try? store?.save(s) }
+        evaluations = DemoData.evaluations
+        if DemoData.startsFocus, let t = tasks.first { startTask(t) }
     }
 
     private static func defaultDBPath() -> String {

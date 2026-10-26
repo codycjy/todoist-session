@@ -23,12 +23,31 @@ struct SessionApp: App {
         MenuBarExtra {
             MenuPanel().environmentObject(model)
         } label: {
-            Text(model.menuTitle)
+            MenuBarLabel(title: model.menuTitle)
         }
         .menuBarExtraStyle(.window)
 
         Window("Session", id: "main") {
-            MainView().environmentObject(model).frame(minWidth: 720, minHeight: 480)
+            MainView().environmentObject(model).frame(minWidth: 960, minHeight: 600)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1120, height: 720)
+    }
+}
+
+/// 菜单栏标题。演示模式下启动即打开主窗口（正常使用时由用户从菜单打开）。
+private struct MenuBarLabel: View {
+    let title: String
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Text(title).onAppear {
+            guard DemoData.enabled else { return }
+            if let a = DemoData.appearance { NSApp.appearance = NSAppearance(named: a) }
+            openWindow(id: "main")
+            if let path = DemoData.snapshotPath {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { DemoData.snapshot(to: path) }
+            }
         }
     }
 }

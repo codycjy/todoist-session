@@ -1,17 +1,18 @@
 import SwiftUI
 import SessionCore
 
-/// 今日专注块时间轴。类型名避开 SwiftUI 自带的 `TimelineView`。
-/// 左列：Todoist 带具体时间的任务（计划）；右列：实际专注块。
+/// 今日时间轴。类型名避开 SwiftUI 自带的 `TimelineView`。
+/// 左列：Todoist 带具体时间的任务（计划，虚线框）；右列：实际专注块（荧光黄）。
 struct FocusTimelineView: View {
     @EnvironmentObject var model: AppModel
     let sessions: [SessionRecord]
     let tasks: [TodoistTask]
+    var selectedTaskId: String?
     var onSelectTask: (TodoistTask) -> Void = { _ in }
     @State private var selected: String?
 
-    private let pointsPerMinute = 1.4
-    private let gutter: CGFloat = 48
+    private let pointsPerMinute = 1.6
+    private let gutter: CGFloat = 46
     private let defaultTaskMinutes = 30.0
     /// 低于此高度的块只画一条细条（标题放进 tooltip），否则文字会撑出块外。
     private static let compactHeight: Double = 18
@@ -35,115 +36,123 @@ struct FocusTimelineView: View {
     @ViewBuilder private func content(now: Date) -> some View {
         let scheduled = scheduled
         let range = TimelineLayout.range(sessions: sessions, scheduled: scheduled.map(\.interval), now: now)
-        let blocks = TimelineLayout.blocks(sessions: sessions, rangeStart: range.start, pointsPerMinute: pointsPerMinute)
+        let blocks = TimelineLayout.blocks(sessions: sessions, rangeStart: range.start, pointsPerMinute: pointsPerMinute,
+                                           minHeight: 10)
         let totalHeight = range.end.timeIntervalSince(range.start) / 60 * pointsPerMinute
         let nowY = now.timeIntervalSince(range.start) / 60 * pointsPerMinute
 
         ScrollViewReader { proxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 GeometryReader { geo in
-                    let columnWidth = max((geo.size.width - gutter - 14) / 2, 40)
+                    let columnsWidth = geo.size.width - gutter - 12
+                    let planWidth = columnsWidth * 0.5 - 3
+                    let doneWidth = columnsWidth * 0.5 - 3
                     ZStack(alignment: .topLeading) {
-                        ForEach(hourMarks(range), id: \.self) { hour in
-                            let y = hour.timeIntervalSince(range.start) / 60 * pointsPerMinute
-                            Text(hour, format: .dateTime.hour().minute())
-                                .font(.inkMono(10)).foregroundStyle(Ink.sub)
-                                .frame(width: gutter - 6, alignment: .trailing)
-                                .offset(y: y - 7)
-                            Rectangle().fill(Ink.rule).frame(height: 1)
+                        ForEach(gridMarks(range), id: \.self) { t in
+                            let y = t.timeIntervalSince(range.start) / 60 * pointsPerMinute
+                            let isHour = Calendar.current.component(.minute, from: t) == 0
+                            if isHour {
+                                Text(Ink.hm(t)).font(.inkMono(10)).foregroundStyle(Ink.sub)
+                                    .frame(width: gutter - 8, alignment: .trailing)
+                                    .offset(y: y - 6)
+                            }
+                            Rectangle().fill(isHour ? Ink.rule : Ink.ruleSoft).frame(height: 1)
                                 .padding(.leading, gutter).offset(y: y)
                         }
                         ForEach(scheduled, id: \.task.id) { item in
                             let box = TimelineLayout.block(for: item.interval, rangeStart: range.start,
-                                                           pointsPerMinute: pointsPerMinute)
-                            Button { onSelectTask(item.task) } label: { scheduledView(item.task, height: box.height) }
-                                .buttonStyle(.plain)
-                                .frame(width: columnWidth)
-                                .offset(x: gutter + 4, y: box.top)
+                                                           pointsPerMinute: pointsPerMinute, minHeight: 10)
+                            Button { onSelectTask(item.task) } label: {
+                                scheduledView(item.task, height: box.height, selected: item.task.id == selectedTaskId)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: planWidth)
+                            .offset(x: gutter + 4, y: box.top)
                         }
                         ForEach(Array(zip(sessions, blocks)), id: \.0.id) { session, block in
                             blockView(session, block)
-                                .frame(width: columnWidth)
-                                .offset(x: gutter + 10 + columnWidth, y: block.top)
+                                .frame(width: doneWidth)
+                                .offset(x: gutter + 4 + planWidth + 6, y: block.top)
                         }
-                        Rectangle().fill(Ink.now).frame(height: 1.5)
-                            .padding(.leading, gutter - 4)
-                            .offset(y: nowY)
-                            .accessibilityHidden(true)
-                        Color.clear.frame(width: 1, height: 1).id("now").offset(y: max(nowY - 120, 0))
+                        // 现在线：左侧时间小签 + 一条横线。
+                        HStack(spacing: 0) {
+                            Text(Ink.hm(now)).font(.inkMono(9, weight: .bold)).foregroundStyle(Color.white)
+                                .padding(.horizontal, 3).padding(.vertical, 1)
+                                .background(Ink.now)
+                                .frame(width: gutter, alignment: .trailing)
+                            Rectangle().fill(Ink.now).frame(height: 1.5)
+                        }
+                        .offset(y: nowY - 6.5)
+                        .accessibilityHidden(true)
+                        Color.clear.frame(width: 1, height: 1).id("now").offset(y: max(nowY - 160, 0))
                     }
-                    .frame(width: geo.size.width, height: totalHeight + 14, alignment: .topLeading)
+                    .frame(width: geo.size.width, height: totalHeight + 16, alignment: .topLeading)
+                    .padding(.top, 10)
                 }
-                .frame(height: totalHeight + 14)
+                .frame(height: totalHeight + 26)
             }
             .onAppear { DispatchQueue.main.async { proxy.scrollTo("now", anchor: .top) } }
             .onChange(of: sessions.count) { _, _ in proxy.scrollTo("now", anchor: .top) }
         }
     }
 
-    private func scheduledView(_ task: TodoistTask, height: Double) -> some View {
-        let color = model.categories.first { $0.todoistProjectId == task.projectId }
-            .map { Color(todoistColor: $0.color) } ?? .gray
-        return VStack(alignment: .leading, spacing: 0) {
-            if height >= Self.compactHeight {
-                HStack(alignment: .top, spacing: 5) {
-                    CategoryMark(color: color, size: 7).padding(.top, 3)
-                    Text(task.content).font(.caption.weight(.medium)).lineLimit(height >= 36 ? 2 : 1)
-                }
-                if height >= 40, let t = task.dueTime {
-                    Text(t, format: .dateTime.hour().minute()).font(.inkMono(10)).foregroundStyle(Ink.sub)
-                }
-            }
-        }
-        .padding(.horizontal, 6).padding(.vertical, height >= Self.compactHeight ? 3 : 0)
-        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
-        .foregroundStyle(Ink.ink)
-        .background(Ink.paper)
-        .overlay(Rectangle().strokeBorder(Ink.ink, style: StrokeStyle(lineWidth: Ink.border, dash: [4, 3])))
-        .contentShape(Rectangle().inset(by: -4))
-        .help("Todoist 计划：\(task.content)")
-    }
-
-    private func hourMarks(_ range: (start: Date, end: Date)) -> [Date] {
+    /// 整点 + 每 15 分钟的细线。
+    private func gridMarks(_ range: (start: Date, end: Date)) -> [Date] {
         var out: [Date] = []
         var t = range.start
         while t <= range.end {
             out.append(t)
-            guard let next = Calendar.current.date(byAdding: .hour, value: 1, to: t) else { break }
-            t = next
+            t = t.addingTimeInterval(15 * 60)
         }
         return out
     }
 
-    private func blockView(_ session: SessionRecord, _ block: TimelineBlock) -> some View {
-        let color = model.category(for: session.categoryId).map { Color(todoistColor: $0.color) } ?? .gray
-        return Button { selected = session.id } label: {
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if block.height >= Self.compactHeight {
-                        HStack(spacing: 5) {
-                            CategoryMark(color: color, size: 7)
-                            Text(session.title).font(.caption.weight(.semibold)).lineLimit(1)
-                        }
-                    }
-                    if block.height >= 36 {
-                        Text("\(session.actualSeconds / 60) 分钟").font(.inkMono(10)).opacity(0.75)
-                    }
+    private func scheduledView(_ task: TodoistTask, height: Double, selected: Bool) -> some View {
+        let color = model.categories.first { $0.todoistProjectId == task.projectId }
+            .map { Color(todoistColor: $0.color) } ?? Ink.faint
+        return VStack(alignment: .leading, spacing: 1) {
+            if height >= Self.compactHeight {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    CategoryMark(color: color, size: 6)
+                    Text(task.content).font(.system(size: 11, weight: .medium)).lineLimit(height >= 38 ? 2 : 1)
                 }
-                .padding(.horizontal, 6).padding(.vertical, block.height >= Self.compactHeight ? 3 : 0)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                if session.syncState == .pending {
-                    Image(systemName: "icloud.slash").font(.caption2).padding(3)
-                        .help("未同步").accessibilityLabel("未同步")
-                } else if let badge = EvaluationDisplay.badge(for: model.evaluations[session.id]) {
-                    Text(badge).font(.inkMono(10, weight: .semibold)).padding(3)
-                        .help("专注度评分").accessibilityLabel("专注度 \(badge)")
+                if height >= 44, let t = task.dueTime {
+                    Text(Ink.hm(t)).font(.inkMono(9.5)).foregroundStyle(Ink.sub)
                 }
             }
-            .frame(height: block.height)
+        }
+        .padding(.horizontal, 6).padding(.vertical, height >= Self.compactHeight ? 4 : 0)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
+        .foregroundStyle(Ink.ink)
+        .background(selected ? Ink.panel : Ink.shelf)
+        .overlay(Rectangle().strokeBorder(Ink.ink.opacity(selected ? 1 : 0.55),
+                                          style: StrokeStyle(lineWidth: selected ? 1.5 : 1, dash: selected ? [] : [3, 2])))
+        .contentShape(Rectangle().inset(by: -4))
+        .help("计划：\(task.content)")
+    }
+
+    private func blockView(_ session: SessionRecord, _ block: TimelineBlock) -> some View {
+        let color = model.category(for: session.categoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint
+        return Button { selected = session.id } label: {
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle().fill(color).frame(width: 3)
+                VStack(alignment: .leading, spacing: 1) {
+                    if block.height >= Self.compactHeight {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(session.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                            Spacer(minLength: 2)
+                            badge(session)
+                        }
+                    }
+                    if block.height >= 38 {
+                        Text("\(Ink.hm(session.startedAt)) · \(session.actualSeconds / 60)m").font(.inkMono(9.5)).opacity(0.7)
+                    }
+                }
+                .padding(.horizontal, 5).padding(.vertical, block.height >= Self.compactHeight ? 3 : 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: block.height, maxHeight: block.height, alignment: .topLeading)
             .foregroundStyle(Ink.onHighlight)
             .background(Ink.highlight)
-            .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: Ink.border))
             .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(.plain)
@@ -156,6 +165,18 @@ struct FocusTimelineView: View {
             }
         }
     }
+
+    @ViewBuilder private func badge(_ session: SessionRecord) -> some View {
+        if session.syncState == .pending {
+            Image(systemName: "icloud.slash").font(.system(size: 9))
+                .help("未同步").accessibilityLabel("未同步")
+        } else if let badge = EvaluationDisplay.badge(for: model.evaluations[session.id]) {
+            Text(badge).font(.inkMono(10, weight: .bold))
+                .padding(.horizontal, 3)
+                .foregroundStyle(Ink.highlight).background(Ink.onHighlight)
+                .help("专注度评分").accessibilityLabel("专注度 \(badge)")
+        }
+    }
 }
 
 private struct SessionDetail: View {
@@ -166,13 +187,13 @@ private struct SessionDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(session.title).font(.headline)
+            Text(session.title).font(.system(size: 14, weight: .semibold))
             Text("\(session.startedAt, format: .dateTime.hour().minute())–\(session.endedAt, format: .dateTime.hour().minute())　实际 \(session.actualSeconds / 60) 分钟")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.inkMono(11)).foregroundStyle(Ink.sub)
             Divider()
             if let evaluation { evaluationView(evaluation) }
             if spans.isEmpty {
-                Text("没有采集到活动（可能未授权辅助功能）").font(.caption).foregroundStyle(.secondary)
+                Text("没有采集到活动（可能未授权辅助功能）").font(.inkMono(11)).foregroundStyle(Ink.sub)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
@@ -193,10 +214,10 @@ private struct SessionDetail: View {
     @ViewBuilder private func evaluationView(_ evaluation: Evaluation) -> some View {
         switch evaluation.status {
         case .pending:
-            Text("评估中…").font(.caption).foregroundStyle(.secondary)
+            Text("评估中…").font(.inkMono(11)).foregroundStyle(Ink.sub)
         case .failed:
             HStack {
-                Text("评估失败").font(.caption).foregroundStyle(.secondary)
+                Text("评估失败").font(.inkMono(11)).foregroundStyle(Ink.sub)
                 Spacer()
                 Button("重新评估", action: onRetry).controlSize(.small)
             }

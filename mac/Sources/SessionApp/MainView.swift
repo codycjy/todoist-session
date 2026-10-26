@@ -1,42 +1,176 @@
 import SwiftUI
 
-/// 主窗口：今日 / 统计 / 设置。首次启动弹出一次权限引导。
+/// 主窗口：左侧栏（今日 / 统计、项目筛选、设置子页）+ 右侧内容。首次启动弹出一次权限引导。
+enum Route: Hashable {
+    case today, stats
+    case project(String)            // Todoist 项目 ID：今日页只看这个项目的任务
+    case settings(SettingsSection)
+}
+
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case timing = "计时", blocking = "黑名单", backend = "后端", permissions = "权限"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .timing: "timer"
+        case .blocking: "nosign"
+        case .backend: "server.rack"
+        case .permissions: "lock.shield"
+        }
+    }
+}
+
 struct MainView: View {
     @EnvironmentObject var model: AppModel
-    @State private var showGuide = !UserDefaults.standard.bool(forKey: PermissionGuide.flagKey)
-    @State private var tab: Tab = .today
+    @State private var showGuide = !UserDefaults.standard.bool(forKey: PermissionGuide.flagKey) && !DemoData.enabled
+    @State private var route: Route = {
+        switch DemoData.initialTab {
+        case "stats": .stats
+        case "settings": .settings(.timing)
+        case "blocking": .settings(.blocking)
+        default: .today
+        }
+    }()
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case today = "今日", stats = "统计", settings = "设置"
-        var id: String { rawValue }
+    private var projectFilter: String? {
+        if case .project(let id) = route { return id }
+        return nil
+    }
+    private var showsToday: Bool {
+        switch route { case .today, .project: true; default: false }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(Tab.allCases) { t in
-                    Button { tab = t } label: {
-                        Text(t.rawValue).font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 16).padding(.vertical, 6)
-                            .foregroundStyle(tab == t ? Ink.paper : Ink.ink)
-                            .background(tab == t ? Ink.ink : Color.clear)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            Rectangle().fill(Ink.ink).frame(height: Ink.border)
+        HStack(spacing: 0) {
+            Sidebar(route: $route)
+                .frame(width: 200)
+            Rectangle().fill(Ink.rule).frame(width: 1)
             ZStack {
                 // 今日页常驻（保留输入草稿与选中的任务），其余按需创建。
-                TodayView().opacity(tab == .today ? 1 : 0).allowsHitTesting(tab == .today)
-                if tab == .stats { StatsView() }
-                if tab == .settings { SettingsView() }
+                TodayView(projectFilter: projectFilter)
+                    .opacity(showsToday ? 1 : 0).allowsHitTesting(showsToday)
+                switch route {
+                case .stats: StatsView()
+                case .settings(let section): SettingsView(section: section)
+                default: EmptyView()
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .ignoresSafeArea(.container, edges: .top)
         .inkWindow()
         .sheet(isPresented: $showGuide) {
             PermissionGuideView().environmentObject(model)
+        }
+    }
+}
+
+private struct Sidebar: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var route: Route
+
+    private var todayMinutes: Int { model.todaySessions.map(\.actualSeconds).reduce(0, +) }
+    private var avgScore: Int? {
+        let scores = model.todaySessions.compactMap { model.evaluations[$0.id]?.focusScore }
+        return scores.isEmpty ? nil : scores.reduce(0, +) / scores.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Rectangle().fill(Ink.highlight).frame(width: 10, height: 10)
+                Text("SESSION").font(.inkMono(12, weight: .bold)).tracking(2.4)
+            }
+            .padding(.top, 46).padding(.horizontal, 16).padding(.bottom, 18)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    group(nil) {
+                        item("今日", icon: "sun.max", route: .today)
+                        item("统计", icon: "chart.bar", route: .stats)
+                    }
+                    if !model.categories.isEmpty {
+                        group("项目") {
+                            ForEach(model.categories.filter { $0.todoistProjectId != nil }) { c in
+                                item(c.name, mark: Color(todoistColor: c.color), route: .project(c.todoistProjectId!),
+                                     count: model.tasks.filter { $0.projectId == c.todoistProjectId }.count)
+                            }
+                        }
+                    }
+                    group("设置") {
+                        ForEach(SettingsSection.allCases) { s in item(s.rawValue, icon: s.icon, route: .settings(s)) }
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+
+            summary
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Ink.shelf)
+    }
+
+    private func group<C: View>(_ title: String?, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let title {
+                Text(title).font(.inkMono(10, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.faint)
+                    .padding(.horizontal, 8).padding(.bottom, 4)
+            }
+            content()
+        }
+    }
+
+    private func item(_ title: String, icon: String? = nil, mark: Color? = nil, route r: Route, count: Int? = nil) -> some View {
+        let selected = route == r
+        return Button { route = r } label: {
+            HStack(spacing: 9) {
+                Group {
+                    if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)) }
+                    else if let mark { CategoryMark(color: mark, size: 8) }
+                }
+                .frame(width: 16)
+                Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
+                Spacer(minLength: 4)
+                if let count, count > 0 { Text("\(count)").font(.inkMono(11)).foregroundStyle(selected ? Ink.paper.opacity(0.7) : Ink.faint) }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .foregroundStyle(selected ? Ink.paper : Ink.ink)
+            .background(selected ? Ink.ink : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Rectangle().fill(Ink.rule).frame(height: 1)
+            Text("今天").font(.inkMono(10, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.faint)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(todayMinutes / 60)").font(.inkMono(30, weight: .medium))
+                Text("分钟").font(.system(size: 11)).foregroundStyle(Ink.sub)
+            }
+            HStack(spacing: 14) {
+                stat("\(model.todaySessions.count)", "番茄")
+                stat(avgScore.map(String.init) ?? "—", "专注度")
+            }
+            HStack(spacing: 6) {
+                Rectangle().fill(model.unsynced > 0 ? Ink.now : Ink.sub).frame(width: 6, height: 6)
+                Text(model.unsynced > 0 ? "\(model.unsynced) 条未同步" : (model.api == nil ? "离线" : "已同步"))
+                    .font(.inkMono(10)).foregroundStyle(Ink.sub)
+                Spacer()
+                Button { Task { await model.refresh(); await model.refreshEvaluations() } } label: {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(Ink.sub).help("刷新")
+            }
+        }
+        .padding(16)
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.inkMono(15, weight: .medium))
+            Text(label).font(.system(size: 10)).foregroundStyle(Ink.sub)
         }
     }
 }
@@ -74,16 +208,16 @@ struct PermissionRows: View {
                 okText: "已授权", missingText: "未授权：无法读取前台窗口，黑名单与活动记录不可用",
                 pane: .accessibility)
             VStack(alignment: .leading, spacing: 4) {
-                Text("自动化").font(.headline)
+                Text("自动化").font(.system(size: 13, weight: .semibold))
                 Text("无法可靠查询。macOS 会在 Session 第一次控制浏览器（Safari / Chrome 等）时弹出授权提示；若之前拒绝过，请在系统设置中手动开启。")
-                    .font(.callout).foregroundStyle(.secondary)
-                Button("打开系统设置") { Permissions.openSettings(.automation) }
+                    .font(.callout).foregroundStyle(Ink.sub)
+                Button("打开系统设置") { Permissions.openSettings(.automation) }.buttonStyle(InkButtonStyle(compact: true))
             }
             switch permissions.notifications {
             case .unavailable:
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("通知").font(.headline)
-                    Text("仅 .app 形态可用").font(.callout).foregroundStyle(.secondary)
+                    Text("通知").font(.system(size: 13, weight: .semibold))
+                    Text("仅 .app 形态可用").font(.callout).foregroundStyle(Ink.sub)
                 }
             case .granted:
                 row("通知", ok: true, okText: "已授权", missingText: "", pane: .notifications)
@@ -95,12 +229,12 @@ struct PermissionRows: View {
 
     private func row(_ name: String, ok: Bool, okText: String, missingText: String, pane: Permissions.Pane) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(name).font(.headline)
+            Text(name).font(.system(size: 13, weight: .semibold))
             if ok {
                 Label(okText, systemImage: "checkmark.square.fill").foregroundStyle(Ink.ink)
             } else {
                 Label(missingText, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Ink.now)
-                Button("打开系统设置") { Permissions.openSettings(pane) }
+                Button("打开系统设置") { Permissions.openSettings(pane) }.buttonStyle(InkButtonStyle(compact: true))
             }
         }
     }
