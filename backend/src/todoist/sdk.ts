@@ -26,6 +26,10 @@ export function createTodoistGateway(token: string): TodoistGateway {
               dueDate: t.due?.date ?? null,
               isRecurring: t.due?.isRecurring ?? false,
               durationMinutes: t.duration?.unit === 'minute' ? t.duration.amount : null,
+              description: t.description ?? '',
+              labels: t.labels ?? [],
+              parentId: t.parentId ?? null,
+              url: t.url,
             })
           }
           cursor = page.nextCursor
