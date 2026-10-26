@@ -41,6 +41,7 @@ struct TodayView: View {
     private static let zh = Locale(identifier: "zh_CN")
 
     private var page: some View {
+        // 详情面板与上方内容同一列：同样的左右边距和 720 宽上限，靠左对齐。
         ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
@@ -67,13 +68,13 @@ struct TodayView: View {
                                 defaultMinutes: model.defaultFocusSeconds / 60,
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
                                 onClose: { select(task: nil) })
-                    .padding(.horizontal, 28).padding(.bottom, 20)
-                    .frame(maxWidth: 720)
+                    .padding(.horizontal, 32).padding(.bottom, 20)
+                    .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             } else if let session = selectedSession {
                 SessionDetailPanel(session: session, onShowTask: { select(task: $0.id) },
                                    onClose: { select(session: nil) })
-                    .padding(.horizontal, 28).padding(.bottom, 20)
-                    .frame(maxWidth: 720)
+                    .padding(.horizontal, 32).padding(.bottom, 20)
+                    .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
