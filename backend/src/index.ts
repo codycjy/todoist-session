@@ -27,7 +27,7 @@ let evalTimer: NodeJS.Timeout | undefined
 const evalKey = process.env.OPENAI_API_KEY
 if (evalKey) {
   const worker = createEvalWorker({
-    db, now: Date.now, evaluator: createOpenRouterEvaluator({ apiKey: evalKey, model: evalModel, baseUrl: process.env.OPENAI_BASE_URL || undefined }),
+    db, now: Date.now, evaluator: createOpenRouterEvaluator({ apiKey: evalKey, model: evalModel, baseUrl: process.env.OPENAI_API_BASE || process.env.OPENAI_BASE_URL || undefined }),
   })
   let running = false
   evalTimer = setInterval(() => {
