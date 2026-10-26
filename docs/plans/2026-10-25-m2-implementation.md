@@ -32,7 +32,7 @@
 - 真实 token（Todoist / API）绝不写入文件、日志或提交，子代理只用假 token 和临时库，不得索要真实 token。
 - 只用显式路径 `git add <paths>`，不用 `git add -A`；不用裸 `git stash`。
 - 提交信息结尾：`Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`。
-- 工作目录限定在 worktree：`/Users/saltfish/Files/Coding/todo-session/.worktrees/phase1-m1`。
+- 工作目录限定在 worktree：`.worktrees/phase1-m1`（仓库根目录下）。
 - 需要 GUI / 系统权限的步骤（Task D6、E1）不能交给子代理，由用户手动验证。
 
 ## 0.2 API 契约（Mac 与后端必须一致）
@@ -74,7 +74,7 @@
 
 ---
 
-## 0.3 参考 activity-clock 的经验（`/Users/saltfish/Files/Coding/activity-clock`）
+## 0.3 参考 activity-clock 的经验（作者本地的 activity-clock 项目）
 
 该项目是用户之前写的 Rust 采集器，`crates/ac-watchers/src/{afk,window}.rs` 里踩过的坑直接并入本计划：
 

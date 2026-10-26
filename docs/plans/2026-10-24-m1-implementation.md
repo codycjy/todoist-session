@@ -13,7 +13,7 @@
 **约定：**
 - 所有 commit message 末尾加一行：`Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
 - 先写失败测试，再写实现（TDD）。
-- 工作目录均为 worktree：`/Users/saltfish/Files/Coding/todo-session/.worktrees/phase1-m1`
+- 工作目录均为 worktree：`.worktrees/phase1-m1`（仓库根目录下）
 
 **API 响应约定（后端与 Mac 共用，务必一致）：**
 
