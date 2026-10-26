@@ -115,7 +115,7 @@ struct FocusTimelineView: View {
             if height >= Self.compactHeight {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     CategoryMark(color: color, size: 6)
-                    Text(task.content).font(.system(size: 11, weight: .medium)).lineLimit(height >= 38 ? 2 : 1)
+                    Text(task.content).font(.ink(11, weight: .medium)).lineLimit(height >= 38 ? 2 : 1)
                 }
                 if height >= 44, let t = task.dueTime {
                     Text(Ink.hm(t)).font(.inkMono(9.5)).foregroundStyle(Ink.sub)
@@ -141,7 +141,7 @@ struct FocusTimelineView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     if block.height >= Self.compactHeight {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(session.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                            Text(session.title).font(.ink(11, weight: .semibold)).lineLimit(1)
                             Spacer(minLength: 2)
                             badge(session)
                         }
@@ -164,7 +164,7 @@ struct FocusTimelineView: View {
 
     @ViewBuilder private func badge(_ session: SessionRecord) -> some View {
         if session.syncState == .pending {
-            Image(systemName: "icloud.slash").font(.system(size: 9))
+            Image(systemName: "icloud.slash").font(.ink(9))
                 .help("未同步").accessibilityLabel("未同步")
         } else if let badge = EvaluationDisplay.badge(for: model.evaluations[session.id]) {
             Text(badge).font(.inkMono(10, weight: .bold))

@@ -41,13 +41,13 @@ struct TaskDetailPanel: View {
                             .font(.inkMono(11)).foregroundStyle(Ink.sub)
                     }
                 }
-                Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
+                Button(action: onClose) { Image(systemName: "xmark").font(.ink(11, weight: .semibold)) }
                     .buttonStyle(.plain).foregroundStyle(Ink.sub)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityLabel("关闭")
             }
 
-            Text(task.content).font(.system(size: 19, weight: .semibold))
+            Text(task.content).font(.ink(19, weight: .semibold))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -82,7 +82,7 @@ struct TaskDetailPanel: View {
                 Spacer(minLength: 8)
                 if !canStart { Text("专注进行中").font(.inkMono(10)).foregroundStyle(Ink.sub) }
                 Button { onStart(chosen) } label: {
-                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.system(size: 10)); Text("开始专注 \(Ink.duration(chosen))") }
+                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注 \(Ink.duration(chosen))") }
                 }
                 .buttonStyle(.inkPrimary).disabled(!canStart)
             }
@@ -93,7 +93,7 @@ struct TaskDetailPanel: View {
     }
 
     private var description: some View {
-        Text(Self.markdown(task.description)).font(.system(size: 13)).lineSpacing(3)
+        Text(Self.markdown(task.description)).font(.ink(13)).lineSpacing(3)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

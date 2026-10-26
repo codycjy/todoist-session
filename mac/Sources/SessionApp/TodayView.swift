@@ -76,7 +76,7 @@ struct TodayView: View {
                     }
                     taskSections
                     if let message = model.errorMessage {
-                        Label(message, systemImage: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(Ink.now)
+                        Label(message, systemImage: "exclamationmark.triangle").font(.ink(12)).foregroundStyle(Ink.now)
                     }
                 }
                 .padding(.horizontal, 32).padding(.top, 44)
@@ -108,7 +108,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(now.formatted(.dateTime.weekday(.wide).locale(Self.zh)) + " · 第 \(Calendar.current.component(.weekOfYear, from: now)) 周")
                     .font(.inkMono(11)).foregroundStyle(Ink.sub)
-                Text(now.formatted(.dateTime.month().day().locale(Self.zh))).font(.system(size: 30, weight: .bold))
+                Text(now.formatted(.dateTime.month().day().locale(Self.zh))).font(.ink(30, weight: .bold))
             }
             Spacer()
             Text(Ink.hm(now)).font(.inkMono(15)).foregroundStyle(Ink.sub)
@@ -131,7 +131,7 @@ struct TodayView: View {
                     HStack(spacing: 5) {
                         CategoryMark(color: model.category(for: categoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
                         Text(model.category(for: categoryId)?.name ?? "无分类").font(.inkMono(11))
-                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                        Image(systemName: "chevron.down").font(.ink(8, weight: .bold))
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .overlay(Rectangle().strokeBorder(Ink.rule, lineWidth: 1))
@@ -144,7 +144,7 @@ struct TodayView: View {
                 }
                 Spacer(minLength: 8)
                 Button(action: start) {
-                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.system(size: 10)); Text("开始专注") }
+                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注") }
                 }
                 .buttonStyle(.inkPrimary)
                 .disabled(trimmedTitle.isEmpty)
@@ -186,7 +186,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     InkSectionHeader(text: "TODOIST")
                     Text(model.api == nil ? "未连接后端，只能使用上面的自定义专注。" : "今天没有任务。")
-                        .font(.system(size: 13)).foregroundStyle(Ink.sub).padding(.top, 6)
+                        .font(.ink(13)).foregroundStyle(Ink.sub).padding(.top, 6)
                 }
             }
             section("已排期", groups.scheduled)
@@ -219,7 +219,7 @@ struct TodayView: View {
                 .frame(width: 44, alignment: .leading)
             CategoryMark(color: cat.map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 8)
             VStack(alignment: .leading, spacing: 3) {
-                Text(task.content).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+                Text(task.content).font(.ink(13.5, weight: .medium)).lineLimit(1)
                 Text(meta(task, cat)).font(.inkMono(10.5)).foregroundStyle(Ink.sub).lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -228,7 +228,7 @@ struct TodayView: View {
                     .foregroundStyle(task.priority == 4 ? Ink.now : Ink.sub)
             }
             Button { model.startTask(task, seconds: task.durationMinutes.map { max(1, $0) * 60 }) } label: {
-                Image(systemName: "play.fill").font(.system(size: 9))
+                Image(systemName: "play.fill").font(.ink(9))
             }
             .buttonStyle(InkButtonStyle(compact: true))
             .disabled(!idle)
@@ -264,7 +264,7 @@ struct TodayView: View {
     private var dayColumn: some View {
         VStack(spacing: 0) {
             HStack(alignment: .lastTextBaseline) {
-                Text("时间轴").font(.system(size: 13, weight: .semibold))
+                Text("时间轴").font(.ink(13, weight: .semibold))
                 Spacer()
                 legend(dashed: true, "计划")
                 legend(dashed: false, "实际")
@@ -346,17 +346,17 @@ private struct FocusCard: View {
                 Spacer()
                 Text("\(Ink.hm(run.startedAt)) → \(Ink.hm(run.endAt))").font(.inkMono(11)).foregroundStyle(Ink.sub)
             }
-            Text(run.title).font(.system(size: 28, weight: .semibold)).lineLimit(2)
+            Text(run.title).font(.ink(28, weight: .semibold)).lineLimit(2)
             // 数字先按很大的字号排，再按卡片剩余的宽高缩到刚好放下。
             Text(AppModel.format(remaining))
-                .font(.system(size: 320, weight: .light, design: .monospaced))
+                .font(.ink(320, weight: .regular))
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.15)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             ProgressRule(progress: progress, minutes: run.plannedSeconds / 60)
             HStack(spacing: 8) {
                 FocusAdjustButtons()
                 Button { model.finishEarly() } label: {
-                    HStack(spacing: 5) { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)); Text("提前完成") }
+                    HStack(spacing: 5) { Image(systemName: "checkmark").font(.ink(10, weight: .bold)); Text("提前完成") }
                 }
                 .buttonStyle(.inkPrimary)
                 .help("现在结束并记录这次专注，休息时长不变")
@@ -371,7 +371,7 @@ private struct FocusCard: View {
                 Text((try? AttributedString(markdown: task.description,
                                             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                      ?? AttributedString(task.description))
-                    .font(.system(size: 13)).foregroundStyle(Ink.sub).lineLimit(4)
+                    .font(.ink(13)).foregroundStyle(Ink.sub).lineLimit(4)
             }
         }
         .inkPanel(padding: 28)
@@ -409,7 +409,7 @@ private struct BreakCard: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("休息中").font(.inkMono(11, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.sub)
             Text(AppModel.format(model.engine.remainingSeconds))
-                .font(.system(size: 72, weight: .light, design: .monospaced)).monospacedDigit()
+                .font(.ink(72, weight: .regular)).monospacedDigit()
             Button("结束休息") { model.endBreak() }.buttonStyle(.ink)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -422,11 +422,11 @@ private struct CompletionCard: View {
     let done: CompletedFocus
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: "checkmark").font(.system(size: 13, weight: .bold))
+            Image(systemName: "checkmark").font(.ink(13, weight: .bold))
                 .foregroundStyle(Ink.onHighlight)
                 .frame(width: 26, height: 26).background(Ink.highlight)
             VStack(alignment: .leading, spacing: 2) {
-                Text(done.run.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text(done.run.title).font(.ink(14, weight: .semibold)).lineLimit(1)
                 Text("完成 \(done.actualSeconds / 60) 分钟 · \(Ink.hm(done.run.startedAt))–\(Ink.hm(done.endedAt))")
                     .font(.inkMono(11)).foregroundStyle(Ink.sub)
             }
@@ -446,7 +446,7 @@ struct CompletionBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("✓ 完成：\(done.run.title)").font(.system(size: 13, weight: .semibold)).lineLimit(2)
+            Text("✓ 完成：\(done.run.title)").font(.ink(13, weight: .semibold)).lineLimit(2)
             HStack {
                 Button("开始\(model.engine.suggestedBreak == .long ? "长休" : "休息") \(model.suggestedBreakSeconds / 60) 分钟") { model.startBreak() }
                     .buttonStyle(InkButtonStyle(compact: true))

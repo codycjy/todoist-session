@@ -10,10 +10,12 @@ enum Ink {
     static let shelf = dynamic(light: 0xE7E9E3, dark: 0x191C19)
     /// 抬起的面板、悬停行。
     static let panel = dynamic(light: 0xFBFBF8, dark: 0x1E221E)
-    static let ink = dynamic(light: 0x141714, dark: 0xE6E9E4)
-    static let sub = dynamic(light: 0x646B63, dark: 0x8E968D)
-    static let faint = dynamic(light: 0x9AA098, dark: 0x5C635B)
-    static let rule = dynamic(light: 0xD3D7CF, dark: 0x2A2F2A)
+    static let ink = dynamic(light: 0x0F120F, dark: 0xEEF1EC)
+    /// 次要文字：两套外观下对纸色底的对比度都在 7:1 左右。
+    static let sub = dynamic(light: 0x4A5149, dark: 0xB0B7AF)
+    /// 最弱文字（计数、说明标签），仍保持约 4.5:1。
+    static let faint = dynamic(light: 0x6E756D, dark: 0x838B82)
+    static let rule = dynamic(light: 0xCBD0C6, dark: 0x30362F)
     static let ruleSoft = dynamic(light: 0xE4E7E0, dark: 0x202420)
     static let highlight = dynamic(light: 0xF4DD3F, dark: 0xE3CB34)
     static let now = dynamic(light: 0xE0442B, dark: 0xFF6A50)
@@ -59,11 +61,36 @@ private extension NSColor {
     }
 }
 
-extension Font {
-    /// 数字、时间、标签用等宽体。
-    static func inkMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+/// 全局字体：内置 JetBrains Mono（OFL），中文由系统回退到苹方。
+enum InkFont {
+    /// `.app` 由 Info.plist 的 ATSApplicationFontsPath 注册；`swift run` 时从 SwiftPM 资源包注册。
+    static func register() {
+        guard Bundle.main.bundleURL.pathExtension != "app",
+              let dir = Bundle.module.url(forResource: "Fonts", withExtension: nil),
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files where url.pathExtension == "ttf" {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
     }
+
+    static func name(_ weight: Font.Weight) -> String {
+        switch weight {
+        case .ultraLight, .thin, .light: "JetBrainsMono-Light"
+        case .medium: "JetBrainsMono-Medium"
+        case .semibold: "JetBrainsMono-SemiBold"
+        case .bold, .heavy, .black: "JetBrainsMono-Bold"
+        default: "JetBrainsMono-Regular"
+        }
+    }
+}
+
+extension Font {
+    /// 界面统一用的等宽编程字体。
+    static func ink(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .custom(InkFont.name(weight), fixedSize: size)
+    }
+    /// 数字、时间、标签：与正文同一字体，保留这个名字方便区分用途。
+    static func inkMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { ink(size, weight: weight) }
 }
 
 /// 小节标题：大写等宽小字 + 可选计数，下方一条细线。
@@ -90,7 +117,7 @@ struct InkButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: compact ? 12 : 13, weight: .semibold))
+            .font(.ink(compact ? 12 : 13, weight: .semibold))
             .padding(.horizontal, compact ? 8 : 14).padding(.vertical, compact ? 4 : 7)
             .foregroundStyle(kind == .primary ? Ink.paper : Ink.ink)
             .background(kind == .primary ? Ink.ink : Color.clear)
@@ -136,7 +163,7 @@ struct InkFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .textFieldStyle(.plain)
-            .font(.system(size: size))
+            .font(.ink(size))
             .padding(.vertical, 6)
             .overlay(alignment: .bottom) { Rectangle().fill(Ink.rule).frame(height: 1) }
     }

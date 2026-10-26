@@ -58,7 +58,7 @@ struct SessionDetailPanel: View {
                         .buttonStyle(.plain).font(.inkMono(11)).foregroundStyle(Ink.sub)
                     }
                 }
-                Text(session.title).font(.system(size: 19, weight: .semibold))
+                Text(session.title).font(.ink(19, weight: .semibold))
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 18) {
                     fact("时间", "\(Ink.hm(session.startedAt))–\(Ink.hm(session.endedAt))")
@@ -69,7 +69,7 @@ struct SessionDetailPanel: View {
             }
             Spacer(minLength: 8)
             scoreBox
-            Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
+            Button(action: onClose) { Image(systemName: "xmark").font(.ink(11, weight: .semibold)) }
                 .buttonStyle(.plain).foregroundStyle(Ink.sub)
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("关闭")
@@ -82,16 +82,16 @@ struct SessionDetailPanel: View {
             switch evaluation?.status {
             case .done?:
                 Text(evaluation?.focusScore.map(String.init) ?? "—").font(.inkMono(28, weight: .semibold))
-                Text("专注度").font(.system(size: 10))
+                Text("专注度").font(.ink(10))
             case .pending?:
                 Text("…").font(.inkMono(22))
-                Text("评估中").font(.system(size: 10))
+                Text("评估中").font(.ink(10))
             case .failed?:
                 Text("!").font(.inkMono(22, weight: .bold))
-                Text("评估失败").font(.system(size: 10))
+                Text("评估失败").font(.ink(10))
             case nil:
                 Text("—").font(.inkMono(22))
-                Text("未评估").font(.system(size: 10))
+                Text("未评估").font(.ink(10))
             }
         }
         .frame(width: 72, height: 64)
@@ -107,7 +107,7 @@ struct SessionDetailPanel: View {
             InkSectionHeader(text: "摘要")
             switch evaluation?.status {
             case .done?:
-                Text(evaluation?.summary ?? "（没有摘要）").font(.system(size: 13)).lineSpacing(3)
+                Text(evaluation?.summary ?? "（没有摘要）").font(.ink(13)).lineSpacing(3)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if let ds = evaluation?.distractions, !ds.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -115,7 +115,7 @@ struct SessionDetailPanel: View {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text("\(Ink.hm(d.start))–\(Ink.hm(d.end))").font(.inkMono(11)).foregroundStyle(Ink.now)
                                     .frame(width: 92, alignment: .leading)
-                                Text(d.reason).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                                Text(d.reason).font(.ink(12)).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -123,17 +123,17 @@ struct SessionDetailPanel: View {
                     .overlay(alignment: .leading) { Rectangle().fill(Ink.now).frame(width: 2) }
                 }
             case .pending?:
-                Text("评估中，完成后会自动更新。").font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                Text("评估中，完成后会自动更新。").font(.ink(12.5)).foregroundStyle(Ink.sub)
             case .failed?:
                 HStack {
-                    Text("评估失败（已尝试 \(evaluation?.attempts ?? 0) 次）").font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                    Text("评估失败（已尝试 \(evaluation?.attempts ?? 0) 次）").font(.ink(12.5)).foregroundStyle(Ink.sub)
                     Spacer()
                     Button("重新评估") { Task { await model.retryEvaluation(sessionId: session.id) } }
                         .buttonStyle(InkButtonStyle(compact: true))
                 }
             case nil:
                 Text(session.syncState == .pending ? "同步到后端后才会评估。" : "没有评估记录。")
-                    .font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                    .font(.ink(12.5)).foregroundStyle(Ink.sub)
             }
         }
     }
@@ -159,14 +159,14 @@ struct SessionDetailPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             InkSectionHeader(text: "应用用时")
             if spans.isEmpty {
-                Text("没有采集到活动（可能未授权辅助功能）").font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                Text("没有采集到活动（可能未授权辅助功能）").font(.ink(12.5)).foregroundStyle(Ink.sub)
             } else {
                 let rows = usageRows
                 let top = rows.first?.seconds ?? 1
                 VStack(spacing: 6) {
                     ForEach(rows) { row in
                         HStack(spacing: 10) {
-                            Text(row.id).font(.system(size: 12)).lineLimit(1)
+                            Text(row.id).font(.ink(12)).lineLimit(1)
                                 .foregroundStyle(row.blocked ? Ink.now : row.idle ? Ink.sub : Ink.ink)
                                 .frame(width: 120, alignment: .leading)
                             GeometryReader { geo in
@@ -195,7 +195,7 @@ struct SessionDetailPanel: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("\(Self.hms(span.startedAt))").font(.inkMono(11)).foregroundStyle(Ink.sub)
                         .frame(width: 60, alignment: .leading)
-                    Text(detail(span)).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                    Text(detail(span)).font(.ink(12)).lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(span.wasBlocked ? Ink.now : span.kind == .idle ? Ink.sub : Ink.ink)
                     Spacer(minLength: 6)
                     Text(Ink.duration(Int(span.duration))).font(.inkMono(11)).foregroundStyle(Ink.faint)

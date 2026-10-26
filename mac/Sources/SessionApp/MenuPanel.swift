@@ -20,7 +20,7 @@ struct MenuPanel: View {
                 status
                 if model.engine.phase == .idle { tasks }
                 if let message = model.errorMessage {
-                    Label(message, systemImage: "exclamationmark.triangle").font(.system(size: 11)).foregroundStyle(Ink.now)
+                    Label(message, systemImage: "exclamationmark.triangle").font(.ink(11)).foregroundStyle(Ink.now)
                         .lineLimit(2)
                 }
             }
@@ -77,7 +77,7 @@ struct MenuPanel: View {
                         .textFieldStyle(InkFieldStyle(size: 14))
                         .onSubmit(quickStart)
                     Button(action: quickStart) {
-                        HStack(spacing: 5) { Image(systemName: "play.fill").font(.system(size: 9)); Text("开始") }
+                        HStack(spacing: 5) { Image(systemName: "play.fill").font(.ink(9)); Text("开始") }
                     }
                     .buttonStyle(InkButtonStyle(kind: .primary, compact: true))
                     .disabled(trimmedTitle.isEmpty)
@@ -98,9 +98,9 @@ struct MenuPanel: View {
                     Text(cat.name).font(.inkMono(10.5)).foregroundStyle(Ink.sub)
                 }
             }
-            if let title { Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(2) }
+            if let title { Text(title).font(.ink(14, weight: .semibold)).lineLimit(2) }
             Text(AppModel.format(model.engine.remainingSeconds))
-                .font(.system(size: 46, weight: .light, design: .monospaced)).monospacedDigit()
+                .font(.ink(46, weight: .regular)).monospacedDigit()
             if let progress { ProgressRule(progress: progress, minutes: minutes) }
             actions()
         }
@@ -120,9 +120,9 @@ struct MenuPanel: View {
                                 .frame(width: 38, alignment: .leading)
                             CategoryMark(color: model.categories.first { $0.todoistProjectId == task.projectId }
                                 .map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
-                            Text(task.content).font(.system(size: 12.5)).lineLimit(1)
+                            Text(task.content).font(.ink(12.5)).lineLimit(1)
                             Spacer(minLength: 4)
-                            Image(systemName: "play.fill").font(.system(size: 8)).foregroundStyle(Ink.sub)
+                            Image(systemName: "play.fill").font(.ink(8)).foregroundStyle(Ink.sub)
                         }
                         .padding(.horizontal, 6).padding(.vertical, 6)
                         .contentShape(Rectangle())
@@ -152,7 +152,7 @@ struct MenuPanel: View {
             Button("退出") { NSApp.terminate(nil) }
         }
         .buttonStyle(.plain)
-        .font(.system(size: 12))
+        .font(.ink(12))
         .foregroundStyle(Ink.sub)
         .padding(.horizontal, 14).padding(.vertical, 9)
         .background(Ink.shelf)

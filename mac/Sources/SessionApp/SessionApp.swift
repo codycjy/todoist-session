@@ -21,16 +21,18 @@ struct SessionApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
+    init() { InkFont.register() }   // 早于任何视图渲染
+
     var body: some Scene {
         MenuBarExtra {
-            MenuPanel().environmentObject(model)
+            MenuPanel().environmentObject(model).font(.ink(13))
         } label: {
             MenuBarLabel(title: model.menuTitle)
         }
         .menuBarExtraStyle(.window)
 
         Window("Session", id: "main") {
-            MainView().environmentObject(model).frame(minWidth: 960, minHeight: 600)
+            MainView().environmentObject(model).font(.ink(13)).frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1120, height: 720)

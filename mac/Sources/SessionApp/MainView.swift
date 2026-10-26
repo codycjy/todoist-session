@@ -123,8 +123,8 @@ private struct Sidebar: View {
         let selected = route == r
         return Button { route = r } label: {
             HStack(spacing: 9) {
-                Image(systemName: icon).font(.system(size: 12, weight: .medium)).frame(width: 16)
-                Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
+                Image(systemName: icon).font(.ink(12, weight: .medium)).frame(width: 16)
+                Text(title).font(.ink(13, weight: selected ? .semibold : .regular)).lineLimit(1)
                 Spacer(minLength: 4)
                 if let count, count > 0 { Text("\(count)").font(.inkMono(11)).foregroundStyle(selected ? Ink.paper.opacity(0.7) : Ink.faint) }
             }
@@ -142,7 +142,7 @@ private struct Sidebar: View {
             Text("今天").font(.inkMono(10, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.faint)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(todayMinutes / 60)").font(.inkMono(30, weight: .medium))
-                Text("分钟").font(.system(size: 11)).foregroundStyle(Ink.sub)
+                Text("分钟").font(.ink(11)).foregroundStyle(Ink.sub)
             }
             HStack(spacing: 14) {
                 stat("\(model.todaySessions.count)", "番茄")
@@ -155,10 +155,10 @@ private struct Sidebar: View {
                 Spacer()
                 Button {
                     appearance = appearance.next
-                } label: { Image(systemName: appearance.icon).font(.system(size: 11)) }
+                } label: { Image(systemName: appearance.icon).font(.ink(11)) }
                 .buttonStyle(.plain).foregroundStyle(Ink.sub).help("外观：\(appearance.label)（点击切换）")
                 Button { Task { await model.refresh(); await model.refreshEvaluations() } } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                    Image(systemName: "arrow.clockwise").font(.ink(11))
                 }
                 .buttonStyle(.plain).foregroundStyle(Ink.sub).help("刷新")
             }
@@ -169,7 +169,7 @@ private struct Sidebar: View {
     private func stat(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value).font(.inkMono(15, weight: .medium))
-            Text(label).font(.system(size: 10)).foregroundStyle(Ink.sub)
+            Text(label).font(.ink(10)).foregroundStyle(Ink.sub)
         }
     }
 }
@@ -184,7 +184,7 @@ struct PermissionGuideView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("需要的系统权限").font(.title2.bold())
+            Text("需要的系统权限").font(.ink(22, weight: .bold))
             Text("Session 在专注期间需要以下权限才能完整工作。可以随时在「设置」页查看和修改。")
                 .foregroundStyle(.secondary)
             PermissionRows().environmentObject(model.permissions)
@@ -207,16 +207,16 @@ struct PermissionRows: View {
                 okText: "已授权", missingText: "未授权：无法读取前台窗口，黑名单与活动记录不可用",
                 pane: .accessibility)
             VStack(alignment: .leading, spacing: 4) {
-                Text("自动化").font(.system(size: 13, weight: .semibold))
+                Text("自动化").font(.ink(13, weight: .semibold))
                 Text("无法可靠查询。macOS 会在 Session 第一次控制浏览器（Safari / Chrome 等）时弹出授权提示；若之前拒绝过，请在系统设置中手动开启。")
-                    .font(.callout).foregroundStyle(Ink.sub)
+                    .font(.ink(12.5)).foregroundStyle(Ink.sub)
                 Button("打开系统设置") { Permissions.openSettings(.automation) }.buttonStyle(InkButtonStyle(compact: true))
             }
             switch permissions.notifications {
             case .unavailable:
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("通知").font(.system(size: 13, weight: .semibold))
-                    Text("仅 .app 形态可用").font(.callout).foregroundStyle(Ink.sub)
+                    Text("通知").font(.ink(13, weight: .semibold))
+                    Text("仅 .app 形态可用").font(.ink(12.5)).foregroundStyle(Ink.sub)
                 }
             case .granted:
                 row("通知", ok: true, okText: "已授权", missingText: "", pane: .notifications)
@@ -228,7 +228,7 @@ struct PermissionRows: View {
 
     private func row(_ name: String, ok: Bool, okText: String, missingText: String, pane: Permissions.Pane) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(name).font(.system(size: 13, weight: .semibold))
+            Text(name).font(.ink(13, weight: .semibold))
             if ok {
                 Label(okText, systemImage: "checkmark.square.fill").foregroundStyle(Ink.ink)
             } else {

@@ -28,7 +28,7 @@ struct StatsView: View {
         HStack(alignment: .lastTextBaseline) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("统计").font(.inkMono(11)).foregroundStyle(Ink.sub)
-                Text(range.title).font(.system(size: 30, weight: .bold))
+                Text(range.title).font(.ink(30, weight: .bold))
             }
             Spacer()
             HStack(spacing: 6) {
@@ -43,9 +43,9 @@ struct StatsView: View {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 200)
         case .unavailable:
             VStack(alignment: .leading, spacing: 10) {
-                Text("暂时拿不到统计数据").font(.system(size: 15, weight: .semibold))
+                Text("暂时拿不到统计数据").font(.ink(15, weight: .semibold))
                 Text("统计由后端计算。请在「设置 › 后端」确认地址与 Token，并确认服务在运行。")
-                    .font(.system(size: 13)).foregroundStyle(Ink.sub)
+                    .font(.ink(13)).foregroundStyle(Ink.sub)
                 Button("重试") { Task { await load() } }.buttonStyle(.ink)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,7 +130,7 @@ struct StatsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         CategoryMark(color: sl.colorName.map { Color(todoistColor: $0) } ?? Ink.faint, size: 8)
-                        Text(sl.name).font(.system(size: 12.5, weight: .medium))
+                        Text(sl.name).font(.ink(12.5, weight: .medium))
                         Spacer()
                         Text(StatsFormat.duration(seconds: sl.seconds)).font(.inkMono(11))
                         Text("\(Int((sl.fraction * 100).rounded()))%").font(.inkMono(11)).foregroundStyle(Ink.sub)
@@ -197,7 +197,7 @@ struct StatsView: View {
                     legend(Ink.highlight, "活跃", StatsFormat.duration(seconds: s.activeSeconds), 100 - idle)
                     legend(Ink.ruleSoft, "闲置", StatsFormat.duration(seconds: s.idleSeconds), idle)
                 }
-                Text("闲置指专注期间超过闲置阈值没有键鼠操作的时间。").font(.system(size: 11)).foregroundStyle(Ink.sub)
+                Text("闲置指专注期间超过闲置阈值没有键鼠操作的时间。").font(.ink(11)).foregroundStyle(Ink.sub)
             } else {
                 empty("暂无活动记录")
             }
@@ -207,14 +207,14 @@ struct StatsView: View {
     private func legend(_ color: Color, _ name: String, _ value: String, _ pct: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Rectangle().fill(color).overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: 1)).frame(width: 9, height: 9)
-            Text(name).font(.system(size: 12))
+            Text(name).font(.ink(12))
             Text(value).font(.inkMono(12, weight: .medium))
             Text("\(pct)%").font(.inkMono(11)).foregroundStyle(Ink.sub)
         }
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+        Text(text).font(.ink(12.5)).foregroundStyle(Ink.sub)
             .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
     }
 

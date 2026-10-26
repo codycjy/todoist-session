@@ -8,7 +8,7 @@ let package = Package(
     dependencies: [.package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0")],
     targets: [
         .target(name: "SessionCore", dependencies: [.product(name: "GRDB", package: "GRDB.swift")]),
-        .executableTarget(name: "SessionApp", dependencies: ["SessionCore"]),
+        .executableTarget(name: "SessionApp", dependencies: ["SessionCore"], resources: [.copy("Resources/Fonts")]),
         .testTarget(name: "SessionCoreTests", dependencies: ["SessionCore"]),
     ]
 )

@@ -14,6 +14,8 @@ BIN_DIR="$(swift build -c release --show-bin-path)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXE" "$APP/Contents/MacOS/$EXE"
+# 内置字体（JetBrains Mono，OFL）：由 Info.plist 的 ATSApplicationFontsPath 自动注册。
+cp -R Sources/SessionApp/Resources/Fonts "$APP/Contents/Resources/Fonts"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,6 +32,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>ATSApplicationFontsPath</key><string>Fonts</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Session 需要控制浏览器（Safari、Chrome 等），以便在专注期间拦截黑名单网站并读取当前标签页的域名。</string>
     <key>NSUserNotificationsUsageDescription</key>

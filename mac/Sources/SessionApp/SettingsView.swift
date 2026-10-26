@@ -31,11 +31,11 @@ private struct SettingsForm: View {
             VStack(alignment: .leading, spacing: 26) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("设置").font(.inkMono(11)).foregroundStyle(Ink.sub)
-                    Text(section.rawValue).font(.system(size: 30, weight: .bold))
+                    Text(section.rawValue).font(.ink(30, weight: .bold))
                 }
                 if store.unsynced {
                     Label("未同步：修改已保存在本机，后端暂不可达，稍后会自动重试", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 12)).foregroundStyle(Ink.now)
+                        .font(.ink(12)).foregroundStyle(Ink.now)
                 }
                 switch section {
                 case .timing: timing
@@ -67,13 +67,13 @@ private struct SettingsForm: View {
             }
             row("休息", hint: "没有分类设置时") {
                 Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")
-                    .font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                    .font(.ink(12.5)).foregroundStyle(Ink.sub)
             }
             row("快捷指令", hint: "开始时运行 session_start，结束时运行 session_end") {
                 VStack(alignment: .leading, spacing: 6) {
                     InkToggle(isOn: $shortcutsEnabled, label: "运行快捷指令")
                     Text("在「快捷指令」App 里新建同名快捷指令即可，没有就跳过。输入是 JSON 文本：event（start / complete / abandon）、title、category、plannedMinutes、actualMinutes。")
-                        .font(.system(size: 11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                        .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if !store.overridden.isEmpty {
@@ -120,7 +120,7 @@ private struct SettingsForm: View {
             row("API Token", hint: hasStoredToken ? "已保存在钥匙串，留空保持不变" : nil) {
                 SecureField(hasStoredToken ? "••••••••" : "粘贴 token", text: $tokenText).textFieldStyle(InkFieldStyle())
             }
-            if keychainFailed { Text("写入钥匙串失败").font(.system(size: 12)).foregroundStyle(Ink.now).padding(.top, 8) }
+            if keychainFailed { Text("写入钥匙串失败").font(.ink(12)).foregroundStyle(Ink.now).padding(.top, 8) }
             HStack(spacing: 8) {
                 Button("保存并应用", action: saveConnection).buttonStyle(.inkPrimary)
                 if hasStoredToken { Button("清除 Token", action: clearToken).buttonStyle(.ink) }
@@ -137,7 +137,7 @@ private struct SettingsForm: View {
             note("给分类单独设定专注 / 休息时长和黑名单，例如 Coding 专注 50 分钟、休息 25 分钟。选了这个分类（或 Todoist 项目）开始专注时生效；没设置的分类用全局设置。")
             if model.categories.isEmpty {
                 Text("还没有分类。今日 Todoist 任务的项目和自定义分类会出现在这里。")
-                    .font(.system(size: 12.5)).foregroundStyle(Ink.faint)
+                    .font(.ink(12.5)).foregroundStyle(Ink.faint)
             }
             VStack(spacing: 0) {
                 ForEach(model.categories) { c in profileRow(c) }
@@ -154,10 +154,10 @@ private struct SettingsForm: View {
             } label: {
                 HStack(spacing: 10) {
                     CategoryMark(color: Color(todoistColor: c.color), size: 9)
-                    Text(c.name).font(.system(size: 13.5, weight: .semibold))
+                    Text(c.name).font(.ink(13.5, weight: .semibold))
                     Spacer()
                     Text(p.map(profileSummary) ?? "使用全局设置").font(.inkMono(11)).foregroundStyle(p == nil ? Ink.faint : Ink.sub)
-                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.sub)
+                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.ink(9, weight: .bold)).foregroundStyle(Ink.sub)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 11)
                 .contentShape(Rectangle())
@@ -235,14 +235,14 @@ private struct SettingsForm: View {
     // MARK: 布局零件
 
     private func note(_ text: String) -> some View {
-        Text(text).font(.system(size: 12.5)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+        Text(text).font(.ink(12.5)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
     }
 
     private func row<C: View>(_ label: String, hint: String? = nil, @ViewBuilder _ control: () -> C) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 20) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(label).font(.system(size: 13, weight: .semibold))
-                if let hint { Text(hint).font(.system(size: 11)).foregroundStyle(Ink.sub) }
+                Text(label).font(.ink(13, weight: .semibold))
+                if let hint { Text(hint).font(.ink(11)).foregroundStyle(Ink.sub) }
             }
             .frame(width: 180, alignment: .leading)
             control().frame(maxWidth: .infinity, alignment: .leading)
@@ -256,13 +256,13 @@ private struct SettingsForm: View {
         VStack(alignment: .leading, spacing: 6) {
             InkSectionHeader(text: title, count: items.count)
             if items.isEmpty {
-                Text("还没有条目").font(.system(size: 12)).foregroundStyle(Ink.faint).padding(.vertical, 8)
+                Text("还没有条目").font(.ink(12)).foregroundStyle(Ink.faint).padding(.vertical, 8)
             }
             ForEach(items, id: \.self) { item in
                 HStack {
-                    Text(item).font(mono ? .inkMono(12) : .system(size: 13))
+                    Text(item).font(mono ? .inkMono(12) : .ink(13))
                     Spacer()
-                    Button { remove(item) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    Button { remove(item) } label: { Image(systemName: "xmark").font(.ink(10, weight: .semibold)) }
                         .buttonStyle(.plain).foregroundStyle(Ink.sub).help("删除")
                 }
                 .padding(.horizontal, 8).padding(.vertical, 7)
@@ -340,7 +340,7 @@ private struct StepperField: View {
             button("minus") { value = max(range.lowerBound, value - step) }.disabled(value <= range.lowerBound)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(value)").font(.inkMono(15, weight: .medium))
-                Text(unit).font(.system(size: 11)).foregroundStyle(Ink.sub)
+                Text(unit).font(.ink(11)).foregroundStyle(Ink.sub)
             }
             .frame(minWidth: 90)
             button("plus") { value = min(range.upperBound, value + step) }.disabled(value >= range.upperBound)
@@ -350,7 +350,7 @@ private struct StepperField: View {
 
     private func button(_ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 10, weight: .bold)).frame(width: 28, height: 28).contentShape(Rectangle())
+            Image(systemName: icon).font(.ink(10, weight: .bold)).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -363,7 +363,7 @@ private struct AppearancePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("主窗口和菜单栏面板一起切换。侧栏底部的小图标也可以快速切换。")
-                .font(.system(size: 12.5)).foregroundStyle(Ink.sub)
+                .font(.ink(12.5)).foregroundStyle(Ink.sub)
             HStack(spacing: 14) {
                 ForEach(AppearanceMode.allCases) { mode in card(mode) }
             }
@@ -379,8 +379,8 @@ private struct AppearancePicker: View {
             VStack(alignment: .leading, spacing: 10) {
                 swatch(mode).frame(height: 84)
                 HStack(spacing: 6) {
-                    Image(systemName: selected ? "checkmark.square.fill" : "square").font(.system(size: 12))
-                    Text(mode.label).font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    Image(systemName: selected ? "checkmark.square.fill" : "square").font(.ink(12))
+                    Text(mode.label).font(.ink(13, weight: selected ? .semibold : .regular))
                 }
             }
             .padding(10)
@@ -430,8 +430,8 @@ struct InkToggle: View {
     var body: some View {
         Button { isOn.toggle() } label: {
             HStack(spacing: 8) {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square").font(.system(size: 13))
-                Text(label).font(.system(size: 13))
+                Image(systemName: isOn ? "checkmark.square.fill" : "square").font(.ink(13))
+                Text(label).font(.ink(13))
             }
             .contentShape(Rectangle())
         }
