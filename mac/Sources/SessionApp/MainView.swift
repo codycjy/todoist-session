@@ -86,7 +86,7 @@ private struct Sidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 Rectangle().fill(Ink.highlight).frame(width: 10, height: 10)
-                Text("SESSION").font(.inkMono(12, weight: .bold)).tracking(2.4)
+                Text("NOW").font(.inkMono(12, weight: .bold)).tracking(2.4)
             }
             .padding(.top, 46).padding(.horizontal, 16).padding(.bottom, 18)
 
@@ -185,7 +185,7 @@ struct PermissionGuideView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("需要的系统权限").font(.ink(22, weight: .bold))
-            Text("Session 在专注期间需要以下权限才能完整工作。可以随时在「设置」页查看和修改。")
+            Text("Now 在专注期间需要以下权限才能完整工作。可以随时在「设置」页查看和修改。")
                 .foregroundStyle(.secondary)
             PermissionRows().environmentObject(model.permissions)
             HStack { Spacer(); Button("知道了") { dismiss() }.buttonStyle(.inkPrimary).keyboardShortcut(.defaultAction) }
@@ -208,7 +208,7 @@ struct PermissionRows: View {
                 pane: .accessibility)
             VStack(alignment: .leading, spacing: 4) {
                 Text("自动化").font(.ink(13, weight: .semibold))
-                Text("无法可靠查询。macOS 会在 Session 第一次控制浏览器（Safari / Chrome 等）时弹出授权提示；若之前拒绝过，请在系统设置中手动开启。")
+                Text("无法可靠查询。macOS 会在 Now 第一次控制浏览器（Safari / Chrome 等）时弹出授权提示；若之前拒绝过，请在系统设置中手动开启。")
                     .font(.ink(12.5)).foregroundStyle(Ink.sub)
                 Button("打开系统设置") { Permissions.openSettings(.automation) }.buttonStyle(InkButtonStyle(compact: true))
             }

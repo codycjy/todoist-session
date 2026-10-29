@@ -21,7 +21,10 @@ struct SessionApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
-    init() { InkFont.register() }   // 早于任何视图渲染
+    init() {
+        LegacyDefaults.migrate()   // 早于 AppModel 读取设置
+        InkFont.register()         // 早于任何视图渲染
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -31,7 +34,7 @@ struct SessionApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Session", id: "main") {
+        Window("Now", id: "main") {
             MainView().environmentObject(model).font(.ink(13)).frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.hiddenTitleBar)
@@ -62,7 +65,7 @@ private struct MenuBarLabel: View {
 
     var body: some View {
         Group {
-            if let rendered { Image(nsImage: rendered) } else { Text(text.isEmpty ? "Session" : text) }
+            if let rendered { Image(nsImage: rendered) } else { Text(text.isEmpty ? "Now" : text) }
         }
         .onAppear {
             guard DemoData.enabled else { return }

@@ -36,7 +36,7 @@ struct MenuPanel: View {
     private var header: some View {
         HStack(spacing: 7) {
             Rectangle().fill(Ink.highlight).frame(width: 9, height: 9)
-            Text("SESSION").font(.inkMono(11, weight: .bold)).tracking(2.2)
+            Text("NOW").font(.inkMono(11, weight: .bold)).tracking(2.2)
             Spacer()
             Text("今日 \(todayMinutes) 分钟 · \(model.todaySessions.count) 番茄").font(.inkMono(10.5)).foregroundStyle(Ink.sub)
         }

@@ -21,7 +21,7 @@ enum DemoData {
     }
 
     @MainActor static func snapshot(to path: String) {
-        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("main") == true || $0.title == "Session" }),
+        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("main") == true || $0.title == "Now" }),
               let view = window.contentView?.superview ?? window.contentView else { NSApp.terminate(nil); return }
         window.setContentSize(NSSize(width: 1120, height: 720))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {

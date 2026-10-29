@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 构建并打包 Session.app（无需 Xcode 工程）。
+# 构建并打包 Now.app（无需 Xcode 工程）。
 # 用法：scripts/build-app.sh            （ad-hoc 签名）
 #       SIGN_IDENTITY="My Cert" scripts/build-app.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP="build/Session.app"
+APP="build/Now.app"
 EXE="SessionApp"
 
 swift build -c release
@@ -24,9 +24,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key><string>app.session.mac</string>
-    <key>CFBundleName</key><string>Session</string>
-    <key>CFBundleDisplayName</key><string>Session</string>
+    <key>CFBundleIdentifier</key><string>app.now.mac</string>
+    <key>CFBundleName</key><string>Now</string>
+    <key>CFBundleDisplayName</key><string>Now</string>
     <key>CFBundleExecutable</key><string>${EXE}</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -37,9 +37,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>ATSApplicationFontsPath</key><string>Fonts</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Session 需要控制浏览器（Safari、Chrome 等），以便在专注期间拦截黑名单网站并读取当前标签页的域名。</string>
+    <string>Now 需要控制浏览器（Safari、Chrome 等），以便在专注期间拦截黑名单网站并读取当前标签页的域名。</string>
     <key>NSUserNotificationsUsageDescription</key>
-    <string>Session 需要发送通知，以便在一个专注时段结束时提醒你休息。</string>
+    <string>Now 需要发送通知，在专注或休息到点时提醒你。</string>
 </dict>
 </plist>
 PLIST
