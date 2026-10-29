@@ -218,8 +218,22 @@ struct PermissionRows: View {
                     Text("通知").font(.ink(13, weight: .semibold))
                     Text("仅 .app 形态可用").font(.ink(12.5)).foregroundStyle(Ink.sub)
                 }
+            case .notDetermined:
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("通知").font(.ink(13, weight: .semibold))
+                    Label("还没有请求：专注或休息到点时无法提醒", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Ink.now)
+                    Button("允许通知") { Task { await permissions.requestNotifications() } }
+                        .buttonStyle(InkButtonStyle(compact: true))
+                }
             case .granted:
-                row("通知", ok: true, okText: "已授权", missingText: "", pane: .notifications)
+                VStack(alignment: .leading, spacing: 4) {
+                    row("通知", ok: true, okText: "已授权", missingText: "", pane: .notifications)
+                    HStack(spacing: 8) {
+                        Button("发送测试通知") { Notifier.post("Now 测试通知", body: "到点时会这样提醒你") }
+                        Button("通知设置") { Permissions.openSettings(.notifications) }
+                    }
+                    .buttonStyle(InkButtonStyle(compact: true))
+                }
             case .missing:
                 row("通知", ok: false, okText: "", missingText: "未授权：专注结束时无法发送通知", pane: .notifications)
             }

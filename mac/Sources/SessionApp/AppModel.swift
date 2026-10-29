@@ -410,6 +410,7 @@ final class AppModel: ObservableObject {
                 tracker = Self.makeTracker(store: store, settings: settings.effective, categoryId: run.categoryId)
                 tracker?.start(run: run); startSampling()
                 runShortcut(Shortcuts.startName, event: "start", run: run, actualSeconds: nil)
+                Task { await Notifier.requestAuthorization() }   // 开始时就问，免得到点才弹授权框
             }
             return true
         }

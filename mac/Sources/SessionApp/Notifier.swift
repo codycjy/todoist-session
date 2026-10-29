@@ -6,6 +6,18 @@ import UserNotifications
 enum Notifier {
     static var isAvailable: Bool { Bundle.main.bundleIdentifier != nil }
 
+    /// 还没问过就弹系统授权框；macOS 只有问过之后才会在「系统设置 → 通知」里列出本 App。
+    @discardableResult
+    static func requestAuthorization() async -> Bool {
+        guard isAvailable else { return false }
+        let center = UNUserNotificationCenter.current()
+        switch await center.notificationSettings().authorizationStatus {
+        case .notDetermined: return (try? await center.requestAuthorization(options: [.alert, .sound])) == true
+        case .authorized, .provisional: return true
+        default: return false
+        }
+    }
+
     static func post(_ title: String, body: String? = nil) {
         guard isAvailable else { return }
         Task {

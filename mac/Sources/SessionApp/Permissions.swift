@@ -24,7 +24,9 @@ enum Permissions {
     static func openSettings(_ pane: Pane) {
         if pane == .notifications {
             // 通知设置不在 security 面板下。
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+            // 带上 bundle id 直接打开本 App 的通知设置页（未注册时系统会停在通知总列表）。
+            let id = Bundle.main.bundleIdentifier.map { "?id=\($0)" } ?? ""
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension\(id)")!)
         } else {
             NSWorkspace.shared.open(pane.url)
         }
@@ -33,8 +35,9 @@ enum Permissions {
 
 enum NotificationState: Equatable {
     case unavailable   // 非 .app 形态（无 bundle id），不能调用通知 API
+    case notDetermined // 还没问过：系统设置里也还看不到本 App
     case granted
-    case missing
+    case missing       // 被拒绝或关闭
 }
 
 /// 权限状态：设置页与首次启动引导共用；App 变为前台时刷新。
@@ -58,6 +61,15 @@ final class PermissionsModel: ObservableObject {
         // 无 bundle 时 UNUserNotificationCenter.current() 会崩溃，必须先判断。
         guard Bundle.main.bundleIdentifier != nil else { notifications = .unavailable; return }
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-        notifications = (status == .authorized || status == .provisional) ? .granted : .missing
+        switch status {
+        case .authorized, .provisional: notifications = .granted
+        case .notDetermined: notifications = .notDetermined
+        default: notifications = .missing
+        }
+    }
+
+    func requestNotifications() async {
+        await Notifier.requestAuthorization()
+        await refresh()
     }
 }
