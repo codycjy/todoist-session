@@ -61,6 +61,8 @@ struct MainView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .inkWindow()
+        .onAppear { DockIcon.show() }
+        .onDisappear { DockIcon.hide() }
         .sheet(isPresented: $showGuide) {
             PermissionGuideView().environmentObject(model)
         }

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 以裸可执行文件（swift run）启动时没有 .app 包，系统默认不把它当前台应用，
-/// 窗口和菜单栏项都不会显示；显式声明为 regular 并激活。M4 打包成 .app 后可移除。
+/// 启动时主窗口会打开，先按 regular 激活（裸可执行文件 swift run 也需要这样才显示窗口）。
+/// 之后 Dock 图标跟着主窗口走：见 `DockIcon`。
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -14,6 +14,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         Browser.restoreAll()
     }
+}
+
+/// 只有主窗口开着时才在 Dock 和 ⌘Tab 里出现；关掉主窗口后只剩菜单栏图标。
+enum DockIcon {
+    @MainActor static func show() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor static func hide() { NSApp.setActivationPolicy(.accessory) }
 }
 
 @main
