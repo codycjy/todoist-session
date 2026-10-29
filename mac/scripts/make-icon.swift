@@ -1,5 +1,5 @@
 // 生成 App 图标（不依赖设计工具，用 Ink 配色直接画）。
-// 用法：swift scripts/make-icon.swift [方案]     → Assets/AppIcon.icns（默认 block）
+// 用法：swift scripts/make-icon.swift [方案]     → Assets/AppIcon.icns（默认 now）
 //       swift scripts/make-icon.swift preview <png>  → 所有方案的对比图
 // 方案：ruler 进度尺 / block 时间块 / mark 墨底方块 / span 时间括号 / focus 回字 /
 //       letter 字母 S / page 日程页 / now 当前线 / cursor 终端光标
@@ -170,7 +170,7 @@ func save(_ img: CGImage, _ path: String) {
 
 let variants: [(String, CGImage)] = [("ruler", ruler), ("block", block), ("mark", mark), ("span", span), ("focus", focus),
                                     ("letter", letter), ("page", page), ("now", nowLine), ("cursor", cursor)]
-let variant = CommandLine.arguments.dropFirst().first ?? "block"
+let variant = CommandLine.arguments.dropFirst().first ?? "now"
 
 if variant == "preview" {
     // 每个方案：256 大图 + 64 / 32 / 16，浅色、深色桌面底各一行。
