@@ -2,6 +2,7 @@
 # 构建并打包 Now.app（无需 Xcode 工程）。
 # 用法：scripts/build-app.sh            （ad-hoc 签名）
 #       SIGN_IDENTITY="My Cert" scripts/build-app.sh
+#       INSTALL=1 scripts/build-app.sh   （另外装到 /Applications/Now.app）
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -44,8 +45,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# 有的终端或复制工具会给新文件打上隔离标记（com.apple.quarantine）。带这个标记、又没有经过公证的 App，
+# 每次打开都会被 Gatekeeper 拦下来，弹出「无法验证」的提示。本机自己构建的包不需要这个标记。
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 codesign --force --sign "${SIGN_IDENTITY:--}" "$APP"
 
 plutil -lint "$APP/Contents/Info.plist"
 codesign --verify --verbose "$APP"
 echo "OK: $APP"
+
+if [[ "${INSTALL:-}" == "1" ]]; then
+    DEST="/Applications/Now.app"
+    osascript -e 'tell application id "app.now.mac" to quit' >/dev/null 2>&1 || true
+    rm -rf "$DEST"
+    ditto "$APP" "$DEST"
+    xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+    echo "OK: $DEST"
+fi
