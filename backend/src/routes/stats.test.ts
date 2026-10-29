@@ -20,8 +20,9 @@ function addEval(db: Ctx['db'], sessionId: string, status: 'pending' | 'done' | 
     createdAt: new Date(0), updatedAt: new Date(0),
   }).run()
 }
-function addSpan(db: Ctx['db'], id: string, sessionId: string, kind: 'active' | 'idle', ms: number) {
-  db.insert(activitySpans).values({ id, sessionId, kind, startedAt: new Date(0), endedAt: new Date(ms) }).run()
+function addSpan(db: Ctx['db'], id: string, sessionId: string, kind: 'active' | 'idle', ms: number,
+  over: Partial<typeof activitySpans.$inferInsert> = {}) {
+  db.insert(activitySpans).values({ id, sessionId, kind, startedAt: new Date(0), endedAt: new Date(ms), ...over }).run()
 }
 const stats = async (app: Ctx['app'], qs: string) => {
   const res = await app.request(`/stats${qs}`, { headers: authHeader })
@@ -34,13 +35,15 @@ it('returns zeros, null average and zero-filled days for an empty range', async 
   const { res, body } = await stats(app, `?from=${from}&to=${from + 3 * DAY}`)
   expect(res.status).toBe(200)
   expect(body).toEqual({
-    totalFocusSeconds: 0, sessionCount: 0, avgFocusScore: null, activeSeconds: 0, idleSeconds: 0,
+    totalFocusSeconds: 0, plannedSeconds: 0, sessionCount: 0, avgFocusScore: null, activeSeconds: 0, idleSeconds: 0,
     days: [
       { date: '2026-10-24', focusSeconds: 0, sessionCount: 0, avgFocusScore: null },
       { date: '2026-10-25', focusSeconds: 0, sessionCount: 0, avgFocusScore: null },
       { date: '2026-10-26', focusSeconds: 0, sessionCount: 0, avgFocusScore: null },
     ],
     byCategory: [],
+    byHour: [],
+    topApps: [],
   })
 })
 
@@ -117,6 +120,47 @@ it('groups by category, descending by seconds, with null for uncategorised', asy
     { categoryId: 'c2', focusSeconds: 300 },
     { categoryId: 'c1', focusSeconds: 250 },
   ])
+})
+
+it('sums planned seconds for the completion rate', async () => {
+  const { app, db } = makeTestApp()
+  const t = utc('2026-10-25T10:00:00Z')
+  addSession(db, 'a', t, { plannedSeconds: 1500, actualSeconds: 1500 })
+  addSession(db, 'b', t + HOUR, { plannedSeconds: 3000, actualSeconds: 600 })
+  const { body } = await stats(app, `?from=${t - HOUR}&to=${t + DAY}`)
+  expect(body.plannedSeconds).toBe(4500)
+  expect(body.totalFocusSeconds).toBe(2100)
+})
+
+it('splits focus time across local hours', async () => {
+  const { app, db } = makeTestApp()
+  // 09:50 local (UTC+8) for 25 min -> 10 min in 09h, 15 min in 10h; 23:40 local for 30 min crosses midnight
+  addSession(db, 'a', utc('2026-10-25T01:50:00Z'), { actualSeconds: 1500 })
+  addSession(db, 'b', utc('2026-10-25T15:40:00Z'), { actualSeconds: 1800 })
+  const from = utc('2026-10-24T16:00:00Z')
+  const { body } = await stats(app, `?from=${from}&to=${from + 2 * DAY}&tzOffsetMinutes=480`)
+  expect(body.byHour).toEqual([
+    { date: '2026-10-25', hour: 9, focusSeconds: 600 },
+    { date: '2026-10-25', hour: 10, focusSeconds: 900 },
+    { date: '2026-10-25', hour: 23, focusSeconds: 1200 },
+    { date: '2026-10-26', hour: 0, focusSeconds: 600 },
+  ])
+  const zoned = await stats(app, `?from=${from}&to=${from + 2 * DAY}&tz=Asia/Shanghai`)
+  expect(zoned.body.byHour).toEqual(body.byHour)
+})
+
+it('ranks active time by site or app', async () => {
+  const { app, db } = makeTestApp()
+  const t = utc('2026-10-25T10:00:00Z')
+  addSession(db, 'a', t); addSession(db, 'out', t + 5 * DAY)
+  addSpan(db, 'p1', 'a', 'active', 120_000, { appName: 'Preview' })
+  addSpan(db, 'p2', 'a', 'active', 60_000, { appName: 'Google Chrome', urlHost: 'github.com' })
+  addSpan(db, 'p3', 'a', 'active', 90_000, { appName: 'Preview' })
+  addSpan(db, 'p4', 'a', 'idle', 999_000, { appName: 'Preview' })
+  addSpan(db, 'p5', 'a', 'active', 999_000)
+  addSpan(db, 'p6', 'out', 'active', 999_000, { appName: 'Slack' })
+  const { body } = await stats(app, `?from=${t - HOUR}&to=${t + DAY}`)
+  expect(body.topApps).toEqual([{ name: 'Preview', seconds: 210 }, { name: 'github.com', seconds: 60 }])
 })
 
 it('isolates users', async () => {
