@@ -21,6 +21,8 @@ private struct SettingsForm: View {
     @State private var tokenText = ""
     @State private var hasStoredToken = false
     @State private var keychainFailed = false
+    @AppStorage(FocusTarget.dailyKey) private var dailyTarget = FocusTarget.dailyDefault
+    @AppStorage(FocusTarget.weeklyKey) private var weeklyTarget = FocusTarget.weeklyDefault
     @State private var editingProfile: String? = DemoData.initialTab == "profiles" ? "c-work" : nil
     @State private var profileApp = ""
     @State private var profileDomain = ""
@@ -61,6 +63,14 @@ private struct SettingsForm: View {
             note("修改只对下一个专注生效，进行中的不受影响。")
             row("专注时长", hint: "开始面板默认选中的时长") {
                 StepperField(value: focusMinutes, range: 1...120, step: 5, unit: "分钟")
+            }
+            row("每日目标", hint: "统计页和侧栏的专注时长目标") {
+                StepperField(value: $dailyTarget, range: FocusTarget.dailyRange, step: 30,
+                             format: { StatsFormat.duration(seconds: $0 * 60) })
+            }
+            row("每周目标", hint: "统计页「周」视图的目标") {
+                StepperField(value: $weeklyTarget, range: FocusTarget.weeklyRange, step: 30,
+                             format: { StatsFormat.duration(seconds: $0 * 60) })
             }
             row("闲置阈值", hint: "超过这么久没有键鼠操作，记为闲置") {
                 StepperField(value: idleSeconds, range: 30...1800, step: 30, unit: "秒")
@@ -336,19 +346,24 @@ private struct SettingsForm: View {
     }
 }
 
-/// 「− 25 分钟 +」样式的步进器。
-private struct StepperField: View {
+/// 「− 25 分钟 +」样式的步进器。`format` 给出时用它显示数值，不再显示单位。
+struct StepperField: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
     let step: Int
-    let unit: String
+    var unit = ""
+    var format: ((Int) -> String)? = nil
 
     var body: some View {
         HStack(spacing: 0) {
             button("minus") { value = max(range.lowerBound, value - step) }.disabled(value <= range.lowerBound)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(value)").font(.inkMono(15, weight: .medium))
-                Text(unit).font(.ink(11)).foregroundStyle(Ink.sub)
+                if let format {
+                    Text(format(value)).font(.inkMono(14, weight: .medium))
+                } else {
+                    Text("\(value)").font(.inkMono(15, weight: .medium))
+                    Text(unit).font(.ink(11)).foregroundStyle(Ink.sub)
+                }
             }
             .frame(minWidth: 90)
             button("plus") { value = min(range.upperBound, value + step) }.disabled(value >= range.upperBound)

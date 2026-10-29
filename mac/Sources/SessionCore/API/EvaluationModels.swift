@@ -92,13 +92,44 @@ public struct StatsSummary: Decodable, Equatable, Sendable {
         public let categoryId: String?
         public let focusSeconds: Int
     }
+    public struct HourShare: Decodable, Equatable, Sendable {
+        public let date: String
+        public let hour: Int
+        public let focusSeconds: Int
+    }
+    public struct AppShare: Decodable, Equatable, Sendable {
+        public let name: String
+        public let seconds: Int
+    }
     public let totalFocusSeconds: Int
+    /// 计划时长合计（完成率的分母）。以下三项旧后端没有，解码为 0 / 空。
+    public let plannedSeconds: Int
     public let sessionCount: Int
     public let avgFocusScore: Int?
     public let activeSeconds: Int
     public let idleSeconds: Int
     public let days: [Day]
     public let byCategory: [CategoryShare]
+    public let byHour: [HourShare]
+    public let topApps: [AppShare]
+
+    private enum CodingKeys: String, CodingKey {
+        case totalFocusSeconds, plannedSeconds, sessionCount, avgFocusScore, activeSeconds, idleSeconds,
+             days, byCategory, byHour, topApps
+    }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        totalFocusSeconds = try c.decode(Int.self, forKey: .totalFocusSeconds)
+        plannedSeconds = try c.decodeIfPresent(Int.self, forKey: .plannedSeconds) ?? 0
+        sessionCount = try c.decode(Int.self, forKey: .sessionCount)
+        avgFocusScore = try c.decodeIfPresent(Int.self, forKey: .avgFocusScore)
+        activeSeconds = try c.decode(Int.self, forKey: .activeSeconds)
+        idleSeconds = try c.decode(Int.self, forKey: .idleSeconds)
+        days = try c.decode([Day].self, forKey: .days)
+        byCategory = try c.decode([CategoryShare].self, forKey: .byCategory)
+        byHour = try c.decodeIfPresent([HourShare].self, forKey: .byHour) ?? []
+        topApps = try c.decodeIfPresent([AppShare].self, forKey: .topApps) ?? []
+    }
 }
 
 /// `GET /settings` 的完整对象。

@@ -1,25 +1,58 @@
 import Foundation
 
-/// 统计页范围；区间为 [from, to)，按调用方给定的日历（本地时区）计算。
-public enum StatsRange: String, CaseIterable, Identifiable, Sendable {
-    case today, week, last30
+/// 统计页的粒度：日 / 周。
+public enum StatsScope: String, CaseIterable, Identifiable, Sendable {
+    case day, week
     public var id: String { rawValue }
+    public var title: String { self == .day ? "日" : "周" }
+}
 
-    public var title: String {
-        switch self { case .today: "今日"; case .week: "本周"; case .last30: "最近30天" }
-    }
+/// 统计页当前看的那一天 / 那一周；`offset` 0 是今天 / 本周，-1 是昨天 / 上周。区间为 [from, to)。
+public struct StatsPeriod: Hashable, Sendable {
+    public var scope: StatsScope
+    public var offset: Int
+
+    public init(scope: StatsScope, offset: Int = 0) { self.scope = scope; self.offset = offset }
+
+    public var previous: StatsPeriod { StatsPeriod(scope: scope, offset: offset - 1) }
 
     public func interval(now: Date, calendar: Calendar) -> (from: Date, to: Date) {
-        let startOfToday = calendar.startOfDay(for: now)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday)!
-        switch self {
-        case .today:
-            return (startOfToday, tomorrow)
+        let today = calendar.startOfDay(for: now)
+        switch scope {
+        case .day:
+            let from = calendar.date(byAdding: .day, value: offset, to: today)!
+            return (from, calendar.date(byAdding: .day, value: 1, to: from)!)
         case .week:
-            if let w = calendar.dateInterval(of: .weekOfYear, for: now) { return (w.start, w.end) }
-            return (startOfToday, tomorrow)
-        case .last30:
-            return (calendar.date(byAdding: .day, value: -29, to: startOfToday)!, tomorrow)
+            let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? today
+            let from = calendar.date(byAdding: .weekOfYear, value: offset, to: start)!
+            return (from, calendar.date(byAdding: .weekOfYear, value: 1, to: from)!)
+        }
+    }
+
+    /// 大标题：今天 / 昨天 / 本周 / 上周，更早的用日期。
+    public func title(now: Date, calendar: Calendar) -> String {
+        switch (scope, offset) {
+        case (.day, 0): "今天"
+        case (.day, -1): "昨天"
+        case (.week, 0): "本周"
+        case (.week, -1): "上周"
+        default: dates(now: now, calendar: calendar)
+        }
+    }
+
+    /// 日期说明，例：「10月28日 周三」「10月26日 – 11月1日」。
+    public func dates(now: Date, calendar: Calendar) -> String {
+        let r = interval(now: now, calendar: calendar)
+        func md(_ d: Date) -> String {
+            let c = calendar.dateComponents([.month, .day], from: d)
+            return "\(c.month!)月\(c.day!)日"
+        }
+        switch scope {
+        case .day:
+            let weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][calendar.component(.weekday, from: r.from) - 1]
+            return "\(md(r.from)) \(weekday)"
+        case .week:
+            return "\(md(r.from)) – \(md(calendar.date(byAdding: .day, value: -1, to: r.to)!))"
         }
     }
 
@@ -46,6 +79,18 @@ public enum StatsFormat {
         guard total > 0 else { return nil }
         return Int((Double(idle) / Double(total) * 100).rounded())
     }
+
+    /// 相对上一周期的变化百分比；上一周期为 0 时没有可比基数，返回 nil。
+    public static func change(_ current: Int, from previous: Int) -> Int? {
+        guard previous > 0 else { return nil }
+        return Int((Double(current - previous) / Double(previous) * 100).rounded())
+    }
+
+    /// part / whole 的百分比（不封顶）；whole 为 0 返回 nil。
+    public static func percent(_ part: Int, of whole: Int) -> Int? {
+        guard whole > 0 else { return nil }
+        return Int((Double(part) / Double(whole) * 100).rounded())
+    }
 }
 
 public enum StatsChartData {
@@ -68,6 +113,18 @@ public enum StatsChartData {
         public let fraction: Double
     }
 
+    public struct HourPoint: Equatable, Identifiable, Sendable {
+        public let hour: Int
+        public let minutes: Double
+        public var id: Int { hour }
+    }
+    public struct HeatCell: Equatable, Identifiable, Sendable {
+        public let date: Date
+        public let hour: Int
+        public let minutes: Double
+        public var id: String { "\(date.timeIntervalSince1970)-\(hour)" }
+    }
+
     static func parse(_ s: String, calendar: Calendar) -> Date? {
         let p = s.split(separator: "-").compactMap { Int($0) }
         guard p.count == 3 else { return nil }
@@ -78,6 +135,30 @@ public enum StatsChartData {
         days.compactMap { d in
             parse(d.date, calendar: calendar).map { DailyPoint(date: $0, minutes: Double(d.focusSeconds) / 60) }
         }
+    }
+
+    /// 日视图：0–23 点每小时的专注分钟，没有记录的小时补 0。
+    public static func hourly(_ hours: [StatsSummary.HourShare]) -> [HourPoint] {
+        var minutes = [Double](repeating: 0, count: 24)
+        for h in hours where (0..<24).contains(h.hour) { minutes[h.hour] += Double(h.focusSeconds) / 60 }
+        return minutes.enumerated().map { HourPoint(hour: $0.offset, minutes: $0.element) }
+    }
+
+    /// 周视图热力图：每一天 × `hours` 里每个小时一格，没有记录的格子为 0。
+    public static func heatmap(days: [StatsSummary.Day], hours: [StatsSummary.HourShare], range: ClosedRange<Int>,
+                               calendar: Calendar) -> [HeatCell] {
+        var seconds: [String: Int] = [:]
+        for h in hours { seconds["\(h.date)T\(h.hour)", default: 0] += h.focusSeconds }
+        return days.flatMap { d -> [HeatCell] in
+            guard let date = parse(d.date, calendar: calendar) else { return [] }
+            return range.map { HeatCell(date: date, hour: $0, minutes: Double(seconds["\(d.date)T\($0)"] ?? 0) / 60) }
+        }
+    }
+
+    /// 要显示的小时范围：默认 8–22 点，有更早 / 更晚的记录时扩展过去。
+    public static func activeHours(_ hours: [StatsSummary.HourShare], default base: ClosedRange<Int> = 8...22) -> ClosedRange<Int> {
+        let used = hours.filter { $0.focusSeconds > 0 }.map(\.hour)
+        return min(base.lowerBound, used.min() ?? base.lowerBound)...max(base.upperBound, used.max() ?? base.upperBound)
     }
 
     /// 按连续有分数的日子分段；无评估的日子断开（不当作 0）。

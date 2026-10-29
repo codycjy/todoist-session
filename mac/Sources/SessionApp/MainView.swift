@@ -1,4 +1,5 @@
 import SwiftUI
+import SessionCore
 
 /// 主窗口：左侧栏（今日 / 统计、设置子页）+ 右侧内容。首次启动弹出一次权限引导。
 enum Route: Hashable {
@@ -73,12 +74,13 @@ private struct Sidebar: View {
     @EnvironmentObject var model: AppModel
     @Binding var route: Route
     @AppStorage(AppearanceMode.key) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(FocusTarget.dailyKey) private var dailyTarget = FocusTarget.dailyDefault
     private var appearance: AppearanceMode {
         get { AppearanceMode(rawValue: appearanceRaw) ?? .system }
         nonmutating set { appearanceRaw = newValue.rawValue; newValue.apply() }
     }
 
-    private var todayMinutes: Int { model.todaySessions.map(\.actualSeconds).reduce(0, +) }
+    private var todaySeconds: Int { model.todaySessions.map(\.actualSeconds).reduce(0, +) }
     private var avgScore: Int? {
         let scores = model.todaySessions.compactMap { model.evaluations[$0.id]?.focusScore }
         return scores.isEmpty ? nil : scores.reduce(0, +) / scores.count
@@ -143,11 +145,18 @@ private struct Sidebar: View {
             Rectangle().fill(Ink.rule).frame(height: 1)
             Text("今天").font(.inkMono(10, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.faint)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(todayMinutes / 60)").font(.inkMono(30, weight: .medium))
-                Text("分钟").font(.ink(11)).foregroundStyle(Ink.sub)
+                Text("\(todaySeconds / 60)").font(.inkMono(30, weight: .medium))
+                Text("/ \(dailyTarget) 分钟").font(.ink(11)).foregroundStyle(Ink.sub)
             }
+            GeometryReader { geo in
+                Rectangle().fill(Ink.highlight)
+                    .frame(width: geo.size.width * min(1, Double(todaySeconds) / Double(max(1, dailyTarget * 60))))
+            }
+            .frame(height: 4)
+            .background(Ink.ruleSoft)
+            .help("每日目标 \(StatsFormat.duration(seconds: dailyTarget * 60))")
             HStack(spacing: 14) {
-                stat("\(model.todaySessions.count)", "番茄")
+                stat("\(model.todaySessions.count)", "段")
                 stat(avgScore.map(String.init) ?? "—", "专注度")
             }
             HStack(spacing: 6) {

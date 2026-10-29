@@ -15,29 +15,76 @@ final class StatsPresenterTests: XCTestCase {
     }
 
     // 2026-10-25 是周日；东八区 10:30
-    func testTodayRange() {
+    func testDayPeriodAndOffset() {
         let now = date("2026-10-25T10:30:00+08:00")
-        let r = StatsRange.today.interval(now: now, calendar: cal)
+        let r = StatsPeriod(scope: .day).interval(now: now, calendar: cal)
         XCTAssertEqual(r.from, date("2026-10-25T00:00:00+08:00"))
         XCTAssertEqual(r.to, date("2026-10-26T00:00:00+08:00"))
+        let y = StatsPeriod(scope: .day).previous.interval(now: now, calendar: cal)
+        XCTAssertEqual(y.from, date("2026-10-24T00:00:00+08:00"))
+        XCTAssertEqual(y.to, r.from)
     }
 
-    func testWeekRangeStartsMondayAndSundayBelongsToIt() {
+    func testWeekPeriodStartsMondayAndSundayBelongsToIt() {
         let now = date("2026-10-25T10:30:00+08:00")
-        let r = StatsRange.week.interval(now: now, calendar: cal)
+        let r = StatsPeriod(scope: .week).interval(now: now, calendar: cal)
         XCTAssertEqual(r.from, date("2026-10-19T00:00:00+08:00"))
         XCTAssertEqual(r.to, date("2026-10-26T00:00:00+08:00"))
+        let prev = StatsPeriod(scope: .week, offset: -1).interval(now: now, calendar: cal)
+        XCTAssertEqual(prev.from, date("2026-10-12T00:00:00+08:00"))
+        XCTAssertEqual(prev.to, r.from)
     }
 
-    func testLast30CoversThirtyDaysIncludingToday() {
-        let now = date("2026-10-25T23:59:00+08:00")
-        let r = StatsRange.last30.interval(now: now, calendar: cal)
-        XCTAssertEqual(r.from, date("2026-09-26T00:00:00+08:00"))
-        XCTAssertEqual(r.to, date("2026-10-26T00:00:00+08:00"))
+    func testPeriodTitles() {
+        let now = date("2026-10-25T10:30:00+08:00")
+        XCTAssertEqual(StatsPeriod(scope: .day).title(now: now, calendar: cal), "今天")
+        XCTAssertEqual(StatsPeriod(scope: .day, offset: -1).title(now: now, calendar: cal), "昨天")
+        XCTAssertEqual(StatsPeriod(scope: .day, offset: -3).title(now: now, calendar: cal), "10月22日 周四")
+        XCTAssertEqual(StatsPeriod(scope: .week).title(now: now, calendar: cal), "本周")
+        XCTAssertEqual(StatsPeriod(scope: .week).dates(now: now, calendar: cal), "10月19日 – 10月25日")
+        XCTAssertEqual(StatsPeriod(scope: .week, offset: -2).title(now: now, calendar: cal), "10月5日 – 10月11日")
     }
 
     func testTzOffsetMinutes() {
-        XCTAssertEqual(StatsRange.tzOffsetMinutes(calendar: cal, at: date("2026-10-25T00:00:00+08:00")), 480)
+        XCTAssertEqual(StatsPeriod.tzOffsetMinutes(calendar: cal, at: date("2026-10-25T00:00:00+08:00")), 480)
+    }
+
+    func testChangeAndPercent() {
+        XCTAssertEqual(StatsFormat.change(112, from: 100), 12)
+        XCTAssertEqual(StatsFormat.change(50, from: 100), -50)
+        XCTAssertNil(StatsFormat.change(50, from: 0))
+        XCTAssertEqual(StatsFormat.percent(3, of: 4), 75)
+        XCTAssertEqual(StatsFormat.percent(5, of: 4), 125)
+        XCTAssertNil(StatsFormat.percent(1, of: 0))
+    }
+
+    func testHourlyFillsAllHours() {
+        let pts = StatsChartData.hourly([.init(date: "2026-10-25", hour: 9, focusSeconds: 600),
+                                         .init(date: "2026-10-25", hour: 23, focusSeconds: 120)])
+        XCTAssertEqual(pts.count, 24)
+        XCTAssertEqual(pts[9].minutes, 10)
+        XCTAssertEqual(pts[23].minutes, 2)
+        XCTAssertEqual(pts[0].minutes, 0)
+    }
+
+    func testHeatmapAndActiveHours() {
+        let days = [StatsSummary.Day(date: "2026-10-24", focusSeconds: 0, sessionCount: 0, avgFocusScore: nil),
+                    StatsSummary.Day(date: "2026-10-25", focusSeconds: 600, sessionCount: 1, avgFocusScore: nil)]
+        let hours = [StatsSummary.HourShare(date: "2026-10-25", hour: 6, focusSeconds: 600)]
+        let range = StatsChartData.activeHours(hours)
+        XCTAssertEqual(range, 6...22)
+        let cells = StatsChartData.heatmap(days: days, hours: hours, range: range, calendar: cal)
+        XCTAssertEqual(cells.count, 2 * 17)
+        XCTAssertEqual(cells.first { $0.hour == 6 && $0.minutes > 0 }?.date, date("2026-10-25T00:00:00+08:00"))
+        XCTAssertEqual(cells.filter { $0.minutes > 0 }.count, 1)
+    }
+
+    func testDecodesSummaryFromOldBackendWithoutNewFields() throws {
+        let json = #"{"totalFocusSeconds":60,"sessionCount":1,"avgFocusScore":null,"activeSeconds":0,"idleSeconds":0,"days":[],"byCategory":[]}"#
+        let s = try JSONDecoder().decode(StatsSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(s.plannedSeconds, 0)
+        XCTAssertEqual(s.byHour, [])
+        XCTAssertEqual(s.topApps, [])
     }
 
     func testDurationText() {

@@ -11,6 +11,8 @@ enum DemoData {
     static var selectedTaskId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SELECT"] : nil }
     static var selectedSessionId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SESSION"] : nil }
     static var editsSession: Bool { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_EDIT"] == "1" }
+    /// 统计页初始粒度（截图用）：`SESSION_DEMO_SCOPE=week`。
+    static var statsScope: StatsScope { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_SCOPE"] == "week" ? .week : .day }
     static var initialTab: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_TAB"] }
     static var appearance: NSAppearance.Name? {
         switch ProcessInfo.processInfo.environment["SESSION_DEMO_APPEARANCE"] {
@@ -23,7 +25,9 @@ enum DemoData {
     @MainActor static func snapshot(to path: String) {
         guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("main") == true || $0.title == "Now" }),
               let view = window.contentView?.superview ?? window.contentView else { NSApp.terminate(nil); return }
-        window.setContentSize(NSSize(width: 1120, height: 720))
+        // 截长页面：SESSION_DEMO_HEIGHT=1400
+        let height = ProcessInfo.processInfo.environment["SESSION_DEMO_HEIGHT"].flatMap(Double.init) ?? 720
+        window.setContentSize(NSSize(width: 1120, height: height))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             view.layoutSubtreeIfNeeded()
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -127,17 +131,38 @@ enum DemoData {
         "s4": Evaluation(status: .failed, focusScore: nil, summary: nil, attempts: 3, distractions: []),
     ]
 
-    /// 最近 7 天的示例统计（只在演示模式下代替 `GET /stats`）。
-    static func stats(now: Date) -> StatsSummary? {
+    /// 示例统计（只在演示模式下代替 `GET /stats`）：按日期确定性生成，翻页和环比都有数。
+    static func stats(period: StatsPeriod, now: Date, calendar: Calendar) -> StatsSummary {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
-        let mins = [95, 140, 60, 0, 175, 120, 86]
-        let scores: [Int?] = [72, 81, 66, nil, 85, 78, 76]
-        let days = (0..<7).map { i -> String in
-            let d = Calendar.current.date(byAdding: .day, value: i - 6, to: now) ?? now
-            let score = scores[i].map(String.init) ?? "null"
-            return #"{"date":"\#(f.string(from: d))","focusSeconds":\#(mins[i] * 60),"sessionCount":\#(mins[i] / 25),"avgFocusScore":\#(score)}"#
+        let r = period.interval(now: now, calendar: calendar)
+        // 每天的专注分钟 → 铺到固定的几个时段
+        let pattern = [95, 140, 60, 0, 175, 120, 205]
+        let slots = [9, 10, 11, 14, 15, 16, 20, 21]
+        var days: [String] = [], hours: [String] = []
+        var total = 0, count = 0
+        var d = r.from
+        while d < r.to {
+            let n = calendar.ordinality(of: .day, in: .era, for: d) ?? 0
+            let future = d > now
+            var mins = future ? 0 : pattern[n % pattern.count]
+            if calendar.isDate(d, inSameDayAs: now) { mins = 205 }
+            let date = f.string(from: d)
+            var left = mins, i = n % 3
+            while left > 0 {
+                let m = min(left, [50, 35, 45][i % 3])
+                hours.append(#"{"date":"\#(date)","hour":\#(slots[(n + i) % slots.count]),"focusSeconds":\#(m * 60)}"#)
+                left -= m; i += 1
+            }
+            let score = mins == 0 ? "null" : String(64 + (n * 7) % 26)
+            days.append(#"{"date":"\#(date)","focusSeconds":\#(mins * 60),"sessionCount":\#(mins / 25),"avgFocusScore":\#(score)}"#)
+            total += mins * 60; count += mins / 25
+            d = calendar.date(byAdding: .day, value: 1, to: d)!
         }
-        let json = #"{"totalFocusSeconds":40560,"sessionCount":26,"avgFocusScore":77,"activeSeconds":36200,"idleSeconds":4360,"days":[\#(days.joined(separator: ","))],"byCategory":[{"categoryId":"c-work","focusSeconds":18600},{"categoryId":"c-study","focusSeconds":13800},{"categoryId":null,"focusSeconds":4800},{"categoryId":"c-life","focusSeconds":3360}]}"#
-        return try? JSONDecoder().decode(StatsSummary.self, from: Data(json.utf8))
+        func share(_ x: Double) -> Int { Int(Double(total) * x) }
+        let apps = total == 0 ? "" : [("Preview", 0.32), ("Xcode", 0.24), ("Obsidian", 0.14), ("github.com", 0.09), ("Pages", 0.06), ("微信", 0.03)]
+            .map { #"{"name":"\#($0.0)","seconds":\#(share($0.1))}"# }.joined(separator: ",")
+        let cats = total == 0 ? "" : #"{"categoryId":"c-work","focusSeconds":\#(share(0.46))},{"categoryId":"c-study","focusSeconds":\#(share(0.34))},{"categoryId":null,"focusSeconds":\#(share(0.12))},{"categoryId":"c-life","focusSeconds":\#(share(0.08))}"#
+        let json = #"{"totalFocusSeconds":\#(total),"plannedSeconds":\#(total * 100 / 92),"sessionCount":\#(count),"avgFocusScore":\#(total == 0 ? "null" : "77"),"activeSeconds":\#(share(0.89)),"idleSeconds":\#(share(0.11)),"days":[\#(days.joined(separator: ","))],"byCategory":[\#(cats)],"byHour":[\#(hours.joined(separator: ","))],"topApps":[\#(apps)]}"#
+        return try! JSONDecoder().decode(StatsSummary.self, from: Data(json.utf8))
     }
 }
