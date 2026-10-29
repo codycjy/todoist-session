@@ -24,6 +24,10 @@ private struct SettingsForm: View {
     @AppStorage(FocusTarget.dailyKey) private var dailyTarget = FocusTarget.dailyDefault
     @AppStorage(FocusTarget.weeklyKey) private var weeklyTarget = FocusTarget.weeklyDefault
     @State private var editingProfile: String? = DemoData.initialTab == "profiles" ? "c-work" : nil
+    @State private var newCategoryName = ""
+    @State private var newCategoryColor = "blue"
+    @State private var draftCategoryName = ""
+    @State private var deletingCategory: Category?
     @State private var profileApp = ""
     @State private var profileDomain = ""
     @AppStorage(Shortcuts.enabledKey) private var shortcutsEnabled = true
@@ -62,7 +66,7 @@ private struct SettingsForm: View {
         VStack(alignment: .leading, spacing: 0) {
             note("修改只对下一个专注生效，进行中的不受影响。")
             row("专注时长", hint: "开始面板默认选中的时长") {
-                StepperField(value: focusMinutes, range: 1...120, step: 5, unit: "分钟")
+                DurationPicker(minutes: focusMinutes, range: 1...120)
             }
             row("每日目标", hint: "统计页和侧栏的专注时长目标") {
                 StepperField(value: $dailyTarget, range: FocusTarget.dailyRange, step: 30,
@@ -152,15 +156,53 @@ private struct SettingsForm: View {
 
     private var profiles: some View {
         VStack(alignment: .leading, spacing: 18) {
-            note("给分类单独设定专注 / 休息时长和黑名单，例如 Coding 专注 50 分钟、休息 25 分钟。选了这个分类（或 Todoist 项目）开始专注时生效；没设置的分类用全局设置。")
+            note("分类由你自己维护，和 Todoist 项目无关。从 Todoist 任务开始专注时，可以在任务详情里给它的项目选一个分类，之后同项目的任务都默认用它。每个分类还可以单独设定专注 / 休息时长和黑名单。")
+            newCategoryRow
             if model.categories.isEmpty {
-                Text("还没有分类。今日 Todoist 任务的项目和自定义分类会出现在这里。")
-                    .font(.ink(12.5)).foregroundStyle(Ink.faint)
+                Text("还没有分类。在上面输入名称新建一个。").font(.ink(12.5)).foregroundStyle(Ink.faint)
             }
             VStack(spacing: 0) {
                 ForEach(model.categories) { c in profileRow(c) }
             }
         }
+        .onChange(of: editingProfile, initial: true) { _, id in
+            draftCategoryName = model.categories.first { $0.id == id }?.name ?? ""
+        }
+        .confirmationDialog("删除分类「\(deletingCategory?.name ?? "")」？", isPresented: Binding(
+            get: { deletingCategory != nil }, set: { if !$0 { deletingCategory = nil } }
+        ), titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
+                if let c = deletingCategory {
+                    if editingProfile == c.id { editingProfile = nil }
+                    Task { await model.deleteCategory(c.id) }
+                }
+                deletingCategory = nil
+            }
+        } message: {
+            Text("已记录的专注仍显示这个分类名，但它不会再出现在可选列表里，专属设置也会一并删除。")
+        }
+    }
+
+    private var newCategoryRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                CategoryMark(color: Color(todoistColor: newCategoryColor), size: 9)
+                TextField("新分类名称，回车添加", text: $newCategoryName).textFieldStyle(InkFieldStyle())
+                    .onSubmit(addCategory)
+                Button("添加", action: addCategory).buttonStyle(InkButtonStyle(compact: true))
+                    .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            CategoryColorPicker(color: $newCategoryColor)
+        }
+        .padding(14)
+        .overlay(Rectangle().strokeBorder(Ink.rule, lineWidth: 1))
+    }
+
+    private func addCategory() {
+        let name = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        newCategoryName = ""
+        Task { await model.createCategory(name: name, color: newCategoryColor) }
     }
 
     private func profileRow(_ c: Category) -> some View {
@@ -182,9 +224,42 @@ private struct SettingsForm: View {
             }
             .buttonStyle(.plain)
             .hoverRow(selected: open)
-            if open { profileEditor(c.id).padding(.horizontal, 10).padding(.bottom, 14) }
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    categoryEditor(c)
+                    profileEditor(c.id)
+                }
+                .padding(.horizontal, 10).padding(.bottom, 14)
+            }
         }
         .overlay(alignment: .bottom) { Rectangle().fill(Ink.ruleSoft).frame(height: 1) }
+    }
+
+    /// 名称、颜色、删除。名称回车或点「保存」生效。
+    private func categoryEditor(_ c: Category) -> some View {
+        let renamed = draftCategoryName.trimmingCharacters(in: .whitespaces)
+        let canRename = !renamed.isEmpty && renamed != c.name
+        return VStack(alignment: .leading, spacing: 0) {
+            row("名称") {
+                HStack(spacing: 8) {
+                    TextField("分类名称", text: $draftCategoryName).textFieldStyle(InkFieldStyle())
+                        .frame(maxWidth: 240)
+                        .onSubmit { if canRename { Task { await model.updateCategory(c.id, name: renamed) } } }
+                    Button("保存") { Task { await model.updateCategory(c.id, name: renamed) } }
+                        .buttonStyle(InkButtonStyle(compact: true)).disabled(!canRename)
+                }
+            }
+            row("颜色") {
+                CategoryColorPicker(color: Binding(get: { c.color },
+                                                   set: { v in Task { await model.updateCategory(c.id, color: v) } }))
+            }
+            row("删除", hint: "历史记录保留分类名") {
+                Button { deletingCategory = c } label: {
+                    HStack(spacing: 5) { Image(systemName: "trash"); Text("删除这个分类") }.foregroundStyle(Ink.now)
+                }
+                .buttonStyle(InkButtonStyle(compact: true))
+            }
+        }
     }
 
     private func profileSummary(_ p: CategoryProfile) -> String {
@@ -203,7 +278,7 @@ private struct SettingsForm: View {
                 }
             }), label: "这个分类使用专属设置").padding(.vertical, 12)
             if p != nil {
-                row("专注时长") { StepperField(value: profileBinding(id, \.focusSeconds, scale: 60), range: 5...120, step: 5, unit: "分钟") }
+                row("专注时长") { DurationPicker(minutes: profileBinding(id, \.focusSeconds, scale: 60), range: 1...120) }
                 row("休息时长", hint: "这个分类专注结束后的休息，长短休都用它") {
                     StepperField(value: profileBinding(id, \.breakSeconds, scale: 60), range: 1...60, step: 5, unit: "分钟")
                 }
@@ -293,7 +368,8 @@ private struct SettingsForm: View {
 
     private func loadConnection() {
         urlText = ConnectionConfig.baseURLString()
-        hasStoredToken = KeychainStore.read() != nil
+        // 演示模式不碰真实钥匙串（未签名的演示程序读它会弹系统授权框）。
+        hasStoredToken = DemoData.enabled ? false : KeychainStore.read() != nil
     }
 
     // MARK: 绑定与动作
@@ -326,7 +402,8 @@ private struct SettingsForm: View {
             keychainFailed = !KeychainStore.write(token)
             tokenText = ""
         }
-        hasStoredToken = KeychainStore.read() != nil
+        // 演示模式不碰真实钥匙串（未签名的演示程序读它会弹系统授权框）。
+        hasStoredToken = DemoData.enabled ? false : KeychainStore.read() != nil
         model.reconfigureAPI()
     }
 

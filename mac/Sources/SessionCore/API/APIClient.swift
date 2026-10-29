@@ -28,13 +28,6 @@ public final class APIClient: @unchecked Sendable {
         return r.tasks
     }
 
-    /// 只同步给定的 Todoist 项目（今日任务涉及的那些），返回全部未归档分类。
-    public func syncProjects(ids: [String]) async throws -> [Category] {
-        struct R: Decodable { let categories: [Category] }
-        let query = [URLQueryItem(name: "ids", value: ids.joined(separator: ","))]
-        return (try await send("GET", "/todoist/projects", query: query) as R).categories
-    }
-
     public func categories() async throws -> [Category] {
         struct R: Decodable { let categories: [Category] }
         return (try await send("GET", "/categories") as R).categories
@@ -44,6 +37,28 @@ public final class APIClient: @unchecked Sendable {
     public func allCategories() async throws -> [Category] {
         struct R: Decodable { let categories: [Category] }
         return (try await send("GET", "/categories", query: [URLQueryItem(name: "all", value: "1")]) as R).categories
+    }
+
+    public func createCategory(name: String, color: String) async throws -> Category {
+        struct R: Decodable { let category: Category }
+        let body = try JSONSerialization.data(withJSONObject: ["name": name, "color": color])
+        return (try await send("POST", "/categories", body: body) as R).category
+    }
+
+    /// 改名 / 改色；nil 字段不改。
+    public func updateCategory(id: String, name: String? = nil, color: String? = nil) async throws -> Category {
+        struct R: Decodable { let category: Category }
+        var payload: [String: String] = [:]
+        payload["name"] = name
+        payload["color"] = color
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        return (try await send("PATCH", "/categories/\(id)", body: body) as R).category
+    }
+
+    /// 后端只归档：历史专注仍能显示名称。
+    public func deleteCategory(id: String) async throws {
+        struct R: Decodable { let ok: Bool }
+        _ = try await send("DELETE", "/categories/\(id)") as R
     }
 
     public func entries() async throws -> [Entry] {

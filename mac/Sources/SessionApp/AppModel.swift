@@ -8,8 +8,10 @@ typealias Category = SessionCore.Category
 @MainActor
 final class AppModel: ObservableObject {
     @Published var tasks: [TodoistTask] = []
-    /// 未归档分类：选择器与 startTask 的项目映射用。
+    /// 未归档分类：用户自己维护，和 Todoist 项目无关。
     @Published var categories: [Category] = []
+    /// Todoist 项目 → 上次给它选的分类 id（"" 表示无分类）。只存在本机。
+    @Published private(set) var projectCategories: [String: String] = [:]
     /// 含已归档分类：历史 session 的名称/颜色查找用。
     @Published var allCategories: [Category] = []
     @Published var entries: [Entry] = []
@@ -61,6 +63,7 @@ final class AppModel: ObservableObject {
             defaults.set(try? JSONEncoder().encode(coding), forKey: "settings.profiles")
         }
         self.defaults = defaults
+        projectCategories = defaults.dictionary(forKey: Self.projectCategoriesKey) as? [String: String] ?? [:]
         engine = TimerEngine(clock: SystemClock(), store: UserDefaultsStateStore(defaults: defaults),
                              autoFinish: defaults.bool(forKey: Self.autoFinishKey))
         settings = SettingsStore(defaults: defaults, env: env)
@@ -217,8 +220,77 @@ final class AppModel: ObservableObject {
     /// 全局默认专注时长（秒），未选分类时开始面板用它预选时长。
     var defaultFocusSeconds: Int { focusSeconds(for: nil) }
 
+    /// Todoist 任务开始专注时用的分类：这个项目上次选的分类；没选过时沿用旧版按项目自动建的分类（如果还在）。
     func categoryId(for task: TodoistTask) -> String? {
-        categories.first { $0.todoistProjectId == task.projectId }?.id
+        if let picked = projectCategories[task.projectId] {
+            return categories.contains { $0.id == picked } ? picked : nil
+        }
+        return categories.first { $0.todoistProjectId == task.projectId }?.id
+    }
+
+    func category(for task: TodoistTask) -> Category? { category(for: categoryId(for: task)) }
+
+    /// 给 Todoist 项目选分类（nil = 无分类），之后这个项目的任务都默认用它。
+    func setCategory(_ categoryId: String?, forProject projectId: String) {
+        projectCategories[projectId] = categoryId ?? ""
+        defaults.set(projectCategories, forKey: Self.projectCategoriesKey)
+    }
+
+    private static let projectCategoriesKey = "todoist.projectCategories"
+
+    // MARK: 分类管理
+
+    func createCategory(name: String, color: String) async {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if DemoData.enabled {
+            let c = Category(id: UUID().uuidString, name: name, color: color, todoistProjectId: nil)
+            categories.append(c); allCategories.append(c); return
+        }
+        guard let api else { return flash("没有连接后端，无法新建分类") }
+        do {
+            let c = try await api.createCategory(name: name, color: color)
+            categories.append(c); allCategories.append(c)
+        } catch { flash("新建分类失败：\(Self.describe([error]))") }
+    }
+
+    func updateCategory(_ id: String, name: String? = nil, color: String? = nil) async {
+        let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name?.isEmpty == true { return }
+        func apply(_ c: Category) {
+            categories = categories.map { $0.id == c.id ? c : $0 }
+            allCategories = allCategories.map { $0.id == c.id ? c : $0 }
+        }
+        if DemoData.enabled {
+            guard let old = categories.first(where: { $0.id == id }) else { return }
+            return apply(Category(id: id, name: name ?? old.name, color: color ?? old.color, todoistProjectId: old.todoistProjectId))
+        }
+        guard let api else { return flash("没有连接后端，无法修改分类") }
+        do { apply(try await api.updateCategory(id: id, name: name, color: color)) }
+        catch { flash("修改分类失败：\(Self.describe([error]))") }
+    }
+
+    /// 删除（后端归档）：历史专注仍显示原名；这个分类的专属设置一并清掉。
+    func deleteCategory(_ id: String) async {
+        if !DemoData.enabled {
+            guard let api else { return flash("没有连接后端，无法删除分类") }
+            do { try await api.deleteCategory(id: id) }
+            catch { return flash("删除分类失败：\(Self.describe([error]))") }
+        }
+        categories.removeAll { $0.id == id }
+        allCategories = allCategories.map {
+            $0.id == id ? Category(id: $0.id, name: $0.name, color: $0.color, todoistProjectId: $0.todoistProjectId, archived: true) : $0
+        }
+        if settings.values.profiles[id] != nil { settings.update { $0.profiles[id] = nil } }
+    }
+
+    /// 短暂提示（4 秒后自动消失）。
+    private func flash(_ message: String) {
+        errorMessage = message
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            if self?.errorMessage == message { self?.errorMessage = nil }
+        }
     }
 
     /// `seconds` 为 nil 时用分类 profile / 全局设置里的专注时长。
@@ -323,7 +395,7 @@ final class AppModel: ObservableObject {
         guard let api else { return }
         var failures: [Error] = []
 
-        // 只关心今天：先拿今日任务，再只同步这些任务所在的项目（不做全量项目管理）。
+        // 只关心今天的 Todoist 任务；分类是自己维护的，不再从 Todoist 项目生成。
         do { tasks = try await api.tasks(filter: .today) } catch {
             failures.append(error)
             // 瞬时失败保留旧列表；仅在认证失效/未配置时清空。
@@ -332,17 +404,7 @@ final class AppModel: ObservableObject {
                 tasks = []
             }
         }
-        let projectIds = Array(Set(tasks.map(\.projectId))).sorted()
-        // 同步失败时回退到 /categories；两者都只留自定义分类和今日任务的项目。
-        let fetched: [Category]?
-        do { fetched = try await api.syncProjects(ids: projectIds) } catch {
-            failures.append(error)
-            do { fetched = try await api.categories() } catch { failures.append(error); fetched = nil }
-        }
-        if let fetched {
-            let today = Set(projectIds)
-            categories = fetched.filter { $0.todoistProjectId.map(today.contains) ?? true }
-        }
+        do { categories = try await api.categories() } catch { failures.append(error) }
         // 失败只影响历史分类查找，不计入错误提示。
         if let all = try? await api.allCategories() { allCategories = all }
         do { entries = try await api.entries() } catch { failures.append(error) }
@@ -368,12 +430,7 @@ final class AppModel: ObservableObject {
         guard let api else { return }
         do { try await api.retryEvaluation(id: sessionId) }
         catch {
-            let message = "重试评估失败，请稍后再试"
-            errorMessage = message
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(4))
-                if self?.errorMessage == message { self?.errorMessage = nil }
-            }
+            flash("重试评估失败，请稍后再试")
         }
         await refreshEvaluations()
     }

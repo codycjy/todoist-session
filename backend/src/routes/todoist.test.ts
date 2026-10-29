@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { TodoistAuthError, type TodoistGateway } from '../todoist/gateway.js'
 import { authHeader, makeTestApp } from '../testing.js'
-import { categories, users } from '../db/schema.js'
+import { users } from '../db/schema.js'
 
 const task = { id: 't1', content: '写周报', projectId: 'p1', priority: 4, dueDate: '2026-10-24', isRecurring: false, durationMinutes: null, description: '', labels: [], parentId: null, url: 'https://app.todoist.com/app/task/t1' }
 
@@ -68,26 +68,10 @@ it('maps a Todoist auth failure to 401 TODOIST_AUTH', async () => {
   expect(await res.json()).toEqual({ error: 'TODOIST_AUTH' })
 })
 
-it('projects upserts categories idempotently and picks up renames', async () => {
-  let name = 'Work'
-  const gateway = gatewayWith({ projects: async () => [{ id: 'p1', name, color: 'blue' }] })
-  const { app, db } = makeTestApp({ gateway })
-
-  const first = await app.request('/todoist/projects', { headers: authHeader })
-  expect((await first.json()).categories).toHaveLength(1)
-
-  name = 'Work 2'
-  const second = await app.request('/todoist/projects', { headers: authHeader })
-  const body = await second.json()
-  expect(body.categories).toHaveLength(1)
-  expect(body.categories[0]).toMatchObject({ name: 'Work 2', color: 'blue', todoistProjectId: 'p1' })
-  expect(db.select().from(categories).all()).toHaveLength(1)
-})
-
 it('returns 409 TODOIST_TOKEN_UNREADABLE when the stored token cannot be decrypted', async () => {
   const { app, db } = makeTestApp({ gateway: gatewayWith() })
   db.update(users).set({ todoistTokenEnc: 'garbage' }).run()
-  for (const path of ['/todoist/tasks', '/todoist/projects']) {
+  for (const path of ['/todoist/tasks']) {
     const res = await app.request(path, { headers: authHeader })
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'TODOIST_TOKEN_UNREADABLE' })
@@ -102,67 +86,4 @@ it('maps unexpected errors to a JSON 500 INTERNAL', async () => {
   expect(res.status).toBe(500)
   expect(await res.json()).toEqual({ error: 'INTERNAL' })
   spy.mockRestore()
-})
-
-it('archives categories whose Todoist project disappeared, but keeps them for history', async () => {
-  let projects = [
-    { id: 'p1', name: 'Work', color: 'blue' },
-    { id: 'p2', name: 'Home', color: 'red' },
-  ]
-  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
-  const first = await (await app.request('/todoist/projects', { headers: authHeader })).json()
-  expect(first.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Home', 'Work'])
-
-  projects = [projects[0]!]
-  const second = await (await app.request('/todoist/projects', { headers: authHeader })).json()
-  expect(second.categories.map((c: { name: string }) => c.name)).toEqual(['Work'])
-
-  const all = await (await app.request('/categories?all=1', { headers: authHeader })).json()
-  expect(all.categories.find((c: { name: string }) => c.name === 'Home')).toMatchObject({ archived: true })
-})
-
-it('un-archives a project that comes back', async () => {
-  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
-  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
-  await app.request('/todoist/projects', { headers: authHeader })
-  projects = [{ id: 'p9', name: 'Other', color: 'red' }]
-  await app.request('/todoist/projects', { headers: authHeader })
-  projects = [{ id: 'p1', name: 'Work', color: 'blue' }, { id: 'p9', name: 'Other', color: 'red' }]
-  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
-  expect(res.categories).toHaveLength(2)
-})
-
-it('never archives custom categories and ignores an empty project list', async () => {
-  let projects = [{ id: 'p1', name: 'Work', color: 'blue' }]
-  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
-  await app.request('/categories', {
-    method: 'POST', headers: { ...authHeader, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: '阅读', color: 'green' }),
-  })
-  await app.request('/todoist/projects', { headers: authHeader })
-  projects = []
-  const res = await (await app.request('/todoist/projects', { headers: authHeader })).json()
-  expect(res.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Work', '阅读'])
-})
-
-it('projects?ids= syncs only the listed projects and archives nothing', async () => {
-  const projects = [
-    { id: 'p1', name: 'Work', color: 'blue' },
-    { id: 'p2', name: 'Home', color: 'red' },
-    { id: 'p3', name: 'Someday', color: 'grey' },
-  ]
-  const { app } = makeTestApp({ gateway: gatewayWith({ projects: async () => projects }) })
-  const first = await (await app.request('/todoist/projects?ids=p1', { headers: authHeader })).json()
-  expect(first.categories.map((c: { name: string }) => c.name)).toEqual(['Work'])
-
-  const second = await (await app.request('/todoist/projects?ids=p2,p9', { headers: authHeader })).json()
-  expect(second.categories.map((c: { name: string }) => c.name).sort()).toEqual(['Home', 'Work'])
-})
-
-it('projects?ids= with an empty list touches nothing', async () => {
-  const gateway = gatewayWith()
-  const { app } = makeTestApp({ gateway })
-  const res = await (await app.request('/todoist/projects?ids=', { headers: authHeader })).json()
-  expect(res.categories).toEqual([])
-  expect(gateway.projects).not.toHaveBeenCalled()
 })

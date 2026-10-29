@@ -120,7 +120,7 @@ struct MenuPanel: View {
                         HStack(spacing: 9) {
                             Text(task.dueTime.map(Ink.hm) ?? "—").font(.inkMono(11)).foregroundStyle(Ink.sub)
                                 .frame(width: 38, alignment: .leading)
-                            CategoryMark(color: model.categories.first { $0.todoistProjectId == task.projectId }
+                            CategoryMark(color: model.category(for: task)
                                 .map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
                             Text(task.content).font(.ink(12.5)).lineLimit(1)
                             Spacer(minLength: 4)

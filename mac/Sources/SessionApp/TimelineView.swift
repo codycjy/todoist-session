@@ -143,7 +143,7 @@ struct FocusTimelineView: View {
     }
 
     private func scheduledView(_ task: TodoistTask, height: Double, selected: Bool) -> some View {
-        let color = model.categories.first { $0.todoistProjectId == task.projectId }
+        let color = model.category(for: task)
             .map { Color(todoistColor: $0.color) } ?? Ink.faint
         return VStack(alignment: .leading, spacing: 1) {
             if height >= Self.compactHeight {

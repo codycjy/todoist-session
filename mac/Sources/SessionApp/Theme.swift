@@ -274,3 +274,69 @@ struct ResizeHandle: View {
             .zIndex(10)
     }
 }
+
+/// 专注时长常用档位（分钟）：设置页和开始面板共用。
+enum FocusPresets {
+    static let minutes = [1, 15, 25, 35, 50]
+    static let seconds = minutes.map { $0 * 60 }
+}
+
+/// 专注时长：常用档位一键选，右侧输入框可填任意分钟数（回车或移开焦点生效，超出范围自动收回）。
+struct DurationPicker: View {
+    @Binding var minutes: Int
+    let range: ClosedRange<Int>
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(FocusPresets.minutes.filter(range.contains), id: \.self) { m in
+                InkChip(text: "\(m)m", selected: m == minutes) { minutes = m }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                TextField("", text: $text)
+                    .textFieldStyle(.plain).font(.inkMono(12, weight: .medium))
+                    .multilineTextAlignment(.trailing).frame(width: 36)
+                    .focused($focused).onSubmit(commit)
+                Text("分钟").font(.ink(11)).foregroundStyle(Ink.sub)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .overlay(Rectangle().strokeBorder(FocusPresets.minutes.contains(minutes) ? Ink.rule : Ink.ink, lineWidth: 1))
+            .help("手动输入 \(range.lowerBound)–\(range.upperBound) 分钟")
+        }
+        .onAppear { text = "\(minutes)" }
+        .onChange(of: minutes) { _, v in text = "\(v)" }
+        .onChange(of: focused) { _, f in if !f { commit() } }
+    }
+
+    private func commit() {
+        if let v = Int(text.trimmingCharacters(in: .whitespaces)) {
+            minutes = min(max(v, range.lowerBound), range.upperBound)
+        }
+        text = "\(minutes)"
+    }
+}
+
+/// 分类可选颜色（沿用 Todoist 的颜色名，和旧数据兼容）。
+enum CategoryPalette {
+    static let names = ["red", "orange", "yellow", "lime_green", "green", "teal", "sky_blue", "blue",
+                        "grape", "magenta", "salmon", "taupe", "charcoal", "grey"]
+}
+
+/// 一排色块，点选即生效。
+struct CategoryColorPicker: View {
+    @Binding var color: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(CategoryPalette.names, id: \.self) { name in
+                Button { color = name } label: {
+                    Rectangle().fill(Color(todoistColor: name)).frame(width: 16, height: 16)
+                        .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: name == color ? 2 : 0).padding(-3))
+                        .padding(3).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help(name)
+            }
+        }
+    }
+}

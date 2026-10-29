@@ -5,6 +5,8 @@ import SessionCore
 struct TaskDetailPanel: View {
     let task: TodoistTask
     let category: Category?
+    /// 可选分类；选了之后这个 Todoist 项目的任务都默认用它。
+    let categories: [Category]
     let canStart: Bool
     /// 分类 profile / 全局默认时长（秒）。
     let defaultSeconds: Int
@@ -13,25 +15,33 @@ struct TaskDetailPanel: View {
     let onClose: () -> Void
     /// 选定时长变化时回调（时间轴据此预览结束时间）。
     var onChoose: (Int) -> Void = { _ in }
+    var onPickCategory: (String?) -> Void = { _ in }
 
     @State private var seconds: Int?
 
     private var taskSeconds: Int? { task.durationMinutes.flatMap { $0 > 0 ? $0 * 60 : nil } }
-    /// 可选时长（秒）：常用四档 + 默认值 + 任务自己的时长。
+    /// 可选时长（秒）：常用档位 + 默认值 + 任务自己的时长。
     private var options: [Int] {
-        Array(Set([15, 25, 45, 60].map { $0 * 60 } + [defaultSeconds] + (taskSeconds.map { [$0] } ?? []))).sorted()
+        Array(Set(FocusPresets.seconds + [defaultSeconds] + (taskSeconds.map { [$0] } ?? []))).sorted()
     }
     private var chosen: Int { seconds ?? taskSeconds ?? defaultSeconds }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if let category {
+                Menu {
+                    Button("无分类") { onPickCategory(nil) }
+                    ForEach(categories) { c in Button(c.name) { onPickCategory(c.id) } }
+                } label: {
                     HStack(spacing: 5) {
-                        CategoryMark(color: Color(todoistColor: category.color), size: 7)
-                        Text(category.name).font(.inkMono(11)).foregroundStyle(Ink.sub)
+                        CategoryMark(color: category.map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
+                        Text(category?.name ?? "无分类").font(.inkMono(11))
+                        Image(systemName: "chevron.down").font(.ink(8, weight: .bold))
                     }
+                    .foregroundStyle(Ink.sub).contentShape(Rectangle())
                 }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .help("给这个 Todoist 项目选分类，之后同项目的任务都默认用它")
                 if task.priority >= 2 {
                     Text("P\(5 - task.priority)").font(.inkMono(11, weight: .bold))
                         .foregroundStyle(task.priority == 4 ? Ink.now : Ink.sub)

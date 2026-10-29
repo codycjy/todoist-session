@@ -74,16 +74,22 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(cats.first?.archived, true)
     }
 
-    func testSyncProjectsSendsOnlyGivenIds() async throws {
-        var captured: URLRequest?
+    func testCategoryCrudRequests() async throws {
+        var seen: [(String, String, [String: Any]?)] = []
         StubURLProtocol.handler = { req in
-            captured = req
-            return (200, Data(#"{"categories":[]}"#.utf8))
+            let body = (try? JSONSerialization.jsonObject(with: bodyData(of: req))) as? [String: Any]
+            seen.append((req.httpMethod ?? "", req.url?.path ?? "", body))
+            if req.httpMethod == "DELETE" { return (200, Data(#"{"ok":true}"#.utf8)) }
+            return (200, Data(#"{"category":{"id":"c1","name":"读书","color":"red","todoistProjectId":null}}"#.utf8))
         }
-        _ = try await makeClient().syncProjects(ids: ["p1", "p2"])
-        XCTAssertEqual(captured?.url?.path, "/todoist/projects")
-        XCTAssertEqual(URLComponents(url: captured!.url!, resolvingAgainstBaseURL: false)?.queryItems,
-                       [URLQueryItem(name: "ids", value: "p1,p2")])
+        let client = makeClient()
+        let created = try await client.createCategory(name: "读书", color: "red")
+        XCTAssertEqual(created.id, "c1")
+        _ = try await client.updateCategory(id: "c1", name: "读书")
+        try await client.deleteCategory(id: "c1")
+        XCTAssertEqual(seen.map { "\($0.0) \($0.1)" }, ["POST /categories", "PATCH /categories/c1", "DELETE /categories/c1"])
+        XCTAssertEqual(seen[0].2 as? [String: String], ["name": "读书", "color": "red"])
+        XCTAssertEqual(seen[1].2 as? [String: String], ["name": "读书"])
     }
 
     func testTasksDecodesAndSendsBearerToken() async throws {

@@ -89,11 +89,12 @@ struct TodayView: View {
                 .background(Color.clear.contentShape(Rectangle()).onTapGesture { dismissPanels() })
             }
             if let task = selectedTask {
-                TaskDetailPanel(task: task, category: category(of: task), canStart: idle,
+                TaskDetailPanel(task: task, category: category(of: task), categories: model.categories, canStart: idle,
                                 defaultSeconds: model.focusSeconds(for: model.categoryId(for: task)),
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
                                 onClose: { select(task: nil) },
-                                onChoose: { taskSeconds = $0 })
+                                onChoose: { taskSeconds = $0 },
+                                onPickCategory: { model.setCategory($0, forProject: task.projectId) })
                     .padding(.horizontal, 32).padding(.bottom, 20)
                     .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             } else if let session = selectedSession {
@@ -169,9 +170,9 @@ struct TodayView: View {
         .inkPanel(padding: 18)
     }
 
-    /// 可选时长（秒）：常用四档 + 当前默认值。
+    /// 可选时长（秒）：常用档位 + 当前默认值。
     private var durationOptions: [Int] {
-        Array(Set([15, 25, 45, 60].map { $0 * 60 } + [model.focusSeconds(for: categoryId)])).sorted()
+        Array(Set(FocusPresets.seconds + [model.focusSeconds(for: categoryId)])).sorted()
     }
 
     private func start() {
@@ -210,7 +211,7 @@ struct TodayView: View {
     }
 
     private func category(of task: TodoistTask) -> Category? {
-        model.categories.first { $0.todoistProjectId == task.projectId }
+        model.category(for: task)
     }
 
     @ViewBuilder private func TaskRow(task: TodoistTask, overdue: Bool) -> some View {
