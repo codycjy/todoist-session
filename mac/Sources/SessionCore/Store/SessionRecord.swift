@@ -13,15 +13,16 @@ public struct SessionRecord: Equatable, Identifiable, Sendable {
     public let actualSeconds: Int
     public let startedAt: Date
     public let endedAt: Date
+    public let allowIdle: Bool
     public var syncState: SyncState
 
     public init(id: String, title: String, categoryId: String?, source: SessionSource,
                 todoistTaskId: String?, entryId: String?, plannedSeconds: Int, actualSeconds: Int,
-                startedAt: Date, endedAt: Date, syncState: SyncState = .pending) {
+                startedAt: Date, endedAt: Date, allowIdle: Bool = false, syncState: SyncState = .pending) {
         self.id = id; self.title = title; self.categoryId = categoryId; self.source = source
         self.todoistTaskId = todoistTaskId; self.entryId = entryId; self.plannedSeconds = plannedSeconds
         self.actualSeconds = actualSeconds; self.startedAt = startedAt; self.endedAt = endedAt
-        self.syncState = syncState
+        self.allowIdle = allowIdle; self.syncState = syncState
     }
 
     public init(_ done: CompletedFocus) {
@@ -29,6 +30,6 @@ public struct SessionRecord: Equatable, Identifiable, Sendable {
                   categoryId: done.run.categoryId, source: done.run.source,
                   todoistTaskId: done.run.todoistTaskId, entryId: done.run.entryId,
                   plannedSeconds: done.run.plannedSeconds, actualSeconds: done.actualSeconds,
-                  startedAt: done.run.startedAt, endedAt: done.endedAt)
+                  startedAt: done.run.startedAt, endedAt: done.endedAt, allowIdle: done.run.allowIdle)
     }
 }

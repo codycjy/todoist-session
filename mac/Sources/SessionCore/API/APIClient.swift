@@ -84,7 +84,7 @@ public final class APIClient: @unchecked Sendable {
                 "id": s.id, "categoryId": orNull(s.categoryId), "source": s.source.rawValue,
                 "todoistTaskId": orNull(s.todoistTaskId), "entryId": orNull(s.entryId),
                 "title": s.title, "plannedSeconds": s.plannedSeconds, "actualSeconds": s.actualSeconds,
-                "startedAt": ms(s.startedAt), "endedAt": ms(s.endedAt),
+                "startedAt": ms(s.startedAt), "endedAt": ms(s.endedAt), "allowIdle": s.allowIdle,
                 "spans": item.spans.map { p -> [String: Any] in [
                     "id": p.id, "kind": p.kind.rawValue, "appBundleId": orNull(p.appBundleId),
                     "appName": orNull(p.appName), "windowTitle": orNull(p.windowTitle),

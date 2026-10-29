@@ -31,6 +31,7 @@ private struct SettingsForm: View {
     @State private var profileApp = ""
     @State private var profileDomain = ""
     @AppStorage(Shortcuts.enabledKey) private var shortcutsEnabled = true
+    @AppStorage(IdleTag.labelKey) private var idleLabel = IdleTag.defaultLabel
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -78,6 +79,17 @@ private struct SettingsForm: View {
             }
             row("闲置阈值", hint: "超过这么久没有键鼠操作，记为闲置") {
                 StepperField(value: idleSeconds, range: 30...1800, step: 30, unit: "秒")
+            }
+            row("可闲置标签", hint: "离开电脑也算在做的任务") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text("@").font(.inkMono(13)).foregroundStyle(Ink.sub)
+                        TextField(IdleTag.defaultLabel, text: $idleLabel)
+                            .textFieldStyle(InkFieldStyle(size: 13)).frame(width: 140)
+                    }
+                    Text("Todoist 任务带这个标签时，开始专注默认打开「可闲置」：AI 评估不把闲置算作分心。开始前、进行中和事后都能手动开关。")
+                        .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                }
             }
             row("休息", hint: "没有分类设置时") {
                 Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")

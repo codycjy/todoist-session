@@ -73,7 +73,7 @@ enum DemoData {
                         dueDate: at(40), isRecurring: false, durationMinutes: 30, labels: ["整理"]),
             TodoistTask(id: "t4", content: "Swift Concurrency 第 6 章", projectId: "p-study", priority: 2,
                         dueDate: at(120), isRecurring: false, durationMinutes: 60,
-                        description: "重点看 actor 隔离和 Sendable 检查。"),
+                        description: "重点看 actor 隔离和 Sendable 检查。", labels: ["可闲置"]),
             TodoistTask(id: "t5", content: "给房东转账", projectId: "p-life", priority: 4,
                         dueDate: today, isRecurring: false),
             TodoistTask(id: "t6", content: "看完 WWDC 视频笔记", projectId: "p-study", priority: 1,
@@ -82,15 +82,16 @@ enum DemoData {
     }
 
     static func sessions(now: Date) -> [SessionRecord] {
-        func s(_ id: String, _ title: String, _ cat: String?, startMin: Int, minutes: Int, synced: Bool = true) -> SessionRecord {
+        func s(_ id: String, _ title: String, _ cat: String?, startMin: Int, minutes: Int, synced: Bool = true,
+               allowIdle: Bool = false) -> SessionRecord {
             let start = now.addingTimeInterval(TimeInterval(startMin * 60))
             return SessionRecord(id: id, title: title, categoryId: cat, source: .custom, todoistTaskId: nil, entryId: nil,
                                  plannedSeconds: 1500, actualSeconds: minutes * 60, startedAt: start,
                                  endedAt: start.addingTimeInterval(TimeInterval(minutes * 60)),
-                                 syncState: synced ? .synced : .pending)
+                                 allowIdle: allowIdle, syncState: synced ? .synced : .pending)
         }
         return [
-            s("s1", "读论文", "c-study", startMin: -230, minutes: 25),
+            s("s1", "读论文", "c-study", startMin: -230, minutes: 25, allowIdle: true),
             s("s2", "读论文", "c-study", startMin: -200, minutes: 25),
             s("s3", "写周报", "c-work", startMin: -95, minutes: 25),
             s("s4", "回复设计评审意见", "c-work", startMin: -62, minutes: 1),

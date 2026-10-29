@@ -18,11 +18,14 @@ public struct FocusSpec: Equatable, Sendable {
     public let todoistTaskId: String?
     public let entryId: String?
     public let plannedSeconds: Int
+    /// 可闲置：任务有一部分离开电脑做，评估时闲置不算分心。
+    public let allowIdle: Bool
 
     public init(title: String, categoryId: String?, source: SessionSource,
-                todoistTaskId: String?, entryId: String?, plannedSeconds: Int) {
+                todoistTaskId: String?, entryId: String?, plannedSeconds: Int, allowIdle: Bool = false) {
         self.title = title; self.categoryId = categoryId; self.source = source
         self.todoistTaskId = todoistTaskId; self.entryId = entryId; self.plannedSeconds = plannedSeconds
+        self.allowIdle = allowIdle
     }
 }
 
@@ -36,7 +39,33 @@ public struct FocusRun: Codable, Equatable, Identifiable, Sendable {
     public let startedAt: Date
     /// 进行中可以用 `adjust(by:)` 加减。
     public internal(set) var plannedSeconds: Int
+    /// 进行中也能用 `setAllowIdle(_:)` 切换。
+    public internal(set) var allowIdle: Bool
     public var endAt: Date { startedAt.addingTimeInterval(TimeInterval(plannedSeconds)) }
+
+    init(id: UUID, title: String, categoryId: String?, source: SessionSource, todoistTaskId: String?,
+         entryId: String?, startedAt: Date, plannedSeconds: Int, allowIdle: Bool = false) {
+        self.id = id; self.title = title; self.categoryId = categoryId; self.source = source
+        self.todoistTaskId = todoistTaskId; self.entryId = entryId; self.startedAt = startedAt
+        self.plannedSeconds = plannedSeconds; self.allowIdle = allowIdle
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, categoryId, source, todoistTaskId, entryId, startedAt, plannedSeconds, allowIdle
+    }
+
+    /// 旧版本存下的进行中状态没有 allowIdle。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(id: c.decode(UUID.self, forKey: .id), title: c.decode(String.self, forKey: .title),
+                      categoryId: c.decodeIfPresent(String.self, forKey: .categoryId),
+                      source: c.decode(SessionSource.self, forKey: .source),
+                      todoistTaskId: c.decodeIfPresent(String.self, forKey: .todoistTaskId),
+                      entryId: c.decodeIfPresent(String.self, forKey: .entryId),
+                      startedAt: c.decode(Date.self, forKey: .startedAt),
+                      plannedSeconds: c.decode(Int.self, forKey: .plannedSeconds),
+                      allowIdle: c.decodeIfPresent(Bool.self, forKey: .allowIdle) ?? false)
+    }
 }
 
 public struct CompletedFocus: Equatable, Sendable {
@@ -120,7 +149,16 @@ public final class TimerEngine {
         setPhase(.focusing(FocusRun(
             id: UUID(), title: spec.title, categoryId: spec.categoryId, source: spec.source,
             todoistTaskId: spec.todoistTaskId, entryId: spec.entryId,
-            startedAt: clock.now, plannedSeconds: spec.plannedSeconds)))
+            startedAt: clock.now, plannedSeconds: spec.plannedSeconds, allowIdle: spec.allowIdle)))
+    }
+
+    /// 进行中的专注切换「可闲置」。
+    public func setAllowIdle(_ on: Bool) {
+        guard case .focusing(var run) = phase, run.allowIdle != on else { return }
+        run.allowIdle = on
+        let fired = timeUpFired
+        setPhase(.focusing(run))
+        timeUpFired = fired
     }
 
     /// 放弃：直接丢弃，不触发 onCompleted，不计入统计。

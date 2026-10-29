@@ -93,13 +93,14 @@ final class LocalStoreTests: XCTestCase {
         }
         try store.append([at("a", 1_000, 1_500), at("b", 1_500, 1_800), at("c", 1_900, 2_500)])
 
-        try store.edit(sessionId: "s1", title: "改过的标题", categoryId: "c-new", actualSeconds: 600)   // 结束于 1_600
+        try store.edit(sessionId: "s1", title: "改过的标题", categoryId: "c-new", actualSeconds: 600, allowIdle: true)   // 结束于 1_600
 
         let got = try XCTUnwrap(store.sessions(from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 10_000)).first)
         XCTAssertEqual(got.title, "改过的标题")
         XCTAssertEqual(got.categoryId, "c-new")
         XCTAssertEqual(got.actualSeconds, 600)
         XCTAssertEqual(got.endedAt, Date(timeIntervalSince1970: 1_600))
+        XCTAssertTrue(got.allowIdle)
         XCTAssertEqual(got.syncState, .pending, "edited sessions are re-uploaded")
         let spans = try store.spans(sessionId: "s1")
         XCTAssertEqual(spans.map(\.id), ["a", "b"])
@@ -108,7 +109,7 @@ final class LocalStoreTests: XCTestCase {
 
     func testEditUnknownSessionIsNoOp() throws {
         let store = try LocalStore(path: nil)
-        XCTAssertNoThrow(try store.edit(sessionId: "nope", title: "x", categoryId: nil, actualSeconds: 60))
+        XCTAssertNoThrow(try store.edit(sessionId: "nope", title: "x", categoryId: nil, actualSeconds: 60, allowIdle: false))
         XCTAssertEqual(try store.pendingCount(), 0)
     }
 

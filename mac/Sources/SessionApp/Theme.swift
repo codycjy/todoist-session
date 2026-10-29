@@ -1,4 +1,5 @@
 import SwiftUI
+import SessionCore
 import AppKit
 
 /// 「手帐方格」风格：纸色底、墨色细线、直角、等宽数字，专注块是荧光笔黄。
@@ -188,7 +189,7 @@ struct InkChip: View {
             .overlay(Rectangle().strokeBorder(selected ? Ink.ink : Ink.rule, lineWidth: 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).fixedSize()
     }
 }
 
@@ -338,5 +339,44 @@ struct CategoryColorPicker: View {
                 .buttonStyle(.plain).help(name)
             }
         }
+    }
+}
+
+/// 「可闲置」：任务有一部分离开电脑做（读纸书、开会、运动），AI 评估时闲置不算分心。
+/// Todoist 任务带 `@<标签>` 时默认打开；标签名在「设置 › 计时」里改。
+enum IdleTag {
+    static let labelKey = "idle.label"
+    static let defaultLabel = "可闲置"
+
+    static var label: String {
+        let v = UserDefaults.standard.string(forKey: labelKey)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return v.isEmpty ? defaultLabel : v
+    }
+
+    static func matches(_ task: TodoistTask) -> Bool {
+        task.labels.contains { $0.caseInsensitiveCompare(label) == .orderedSame }
+    }
+}
+
+/// 可闲置开关，样式同 `InkChip`。
+struct IdleToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "figure.walk").font(.ink(10, weight: .semibold))
+                Text("可闲置").font(.inkMono(11, weight: isOn ? .semibold : .regular))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .foregroundStyle(isOn ? Ink.paper : Ink.sub)
+            .background(isOn ? Ink.ink : Color.clear)
+            .overlay(Rectangle().strokeBorder(isOn ? Ink.ink : Ink.rule, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).fixedSize()
+        .help(isOn ? "可闲置：离开电脑的时间不算分心（点击关闭）" : "这次有一部分不在电脑上做？打开后闲置不算分心")
+        .accessibilityLabel("可闲置")
+        .accessibilityValue(isOn ? "开" : "关")
     }
 }

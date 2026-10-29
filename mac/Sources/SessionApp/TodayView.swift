@@ -15,6 +15,7 @@ struct TodayView: View {
     /// 任务详情里选定的时长，时间轴预览用。
     @State private var taskSeconds: Int?
     @FocusState private var composerFocused: Bool
+    @State private var composerAllowIdle = false
     @AppStorage("layout.timelineWidth") private var timelineWidth = 340.0
 
     private var idle: Bool { model.engine.phase == .idle }
@@ -91,7 +92,7 @@ struct TodayView: View {
             if let task = selectedTask {
                 TaskDetailPanel(task: task, category: category(of: task), categories: model.categories, canStart: idle,
                                 defaultSeconds: model.focusSeconds(for: model.categoryId(for: task)),
-                                onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
+                                onStart: { secs, idleOK in model.startTask(task, seconds: secs, allowIdle: idleOK); selectedTaskId = nil },
                                 onClose: { select(task: nil) },
                                 onChoose: { taskSeconds = $0 },
                                 onPickCategory: { model.setCategory($0, forProject: task.projectId) })
@@ -146,11 +147,13 @@ struct TodayView: View {
                 ForEach(durationOptions, id: \.self) { s in
                     InkChip(text: Ink.chip(s), selected: s == effectiveSeconds) { seconds = s }
                 }
+                Rectangle().fill(Ink.rule).frame(width: 1, height: 16).padding(.horizontal, 4)
+                IdleToggle(isOn: $composerAllowIdle)
                 Spacer(minLength: 8)
                 Button(action: start) {
                     HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注") }
                 }
-                .buttonStyle(.inkPrimary)
+                .buttonStyle(.inkPrimary).fixedSize()
                 .disabled(trimmedTitle.isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
@@ -177,8 +180,8 @@ struct TodayView: View {
 
     private func start() {
         guard idle, !trimmedTitle.isEmpty else { return }
-        model.startCustom(title: trimmedTitle, categoryId: categoryId, seconds: effectiveSeconds)
-        title = ""
+        model.startCustom(title: trimmedTitle, categoryId: categoryId, seconds: effectiveSeconds, allowIdle: composerAllowIdle)
+        title = ""; composerAllowIdle = false
     }
 
     // MARK: 任务分组
@@ -381,6 +384,7 @@ private struct FocusCard: View {
                 .buttonStyle(.inkPrimary)
                 .help(model.isOvertime ? "结束并记录这次专注（含超时）" : "现在结束并记录这次专注，休息时长不变")
                 Spacer()
+                IdleToggle(isOn: Binding(get: { run.allowIdle }, set: { model.setAllowIdle($0) }))
                 Button("放弃") { model.abandon() }.buttonStyle(.ink).help("放弃这次专注，不记录")
             }
             if model.accessibilityMissing {

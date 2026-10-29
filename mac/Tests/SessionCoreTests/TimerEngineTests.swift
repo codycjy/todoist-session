@@ -235,6 +235,24 @@ final class TimerEngineTests: XCTestCase {
         XCTAssertFalse(engine.adjust(by: -300))
     }
 
+    func testAllowIdleCarriesFromSpecAndToggles() throws {
+        let engine = makeEngine()
+        try engine.start(FocusSpec(title: "跑步", categoryId: nil, source: .custom, todoistTaskId: nil, entryId: nil,
+                                   plannedSeconds: 1500, allowIdle: true))
+        guard case .focusing(let run) = engine.phase else { return XCTFail("expected focusing") }
+        XCTAssertTrue(run.allowIdle)
+        engine.setAllowIdle(false)
+        guard case .focusing(let saved) = store.saved else { return XCTFail("toggle must be persisted") }
+        XCTAssertFalse(saved.allowIdle)
+        XCTAssertEqual(saved.startedAt, run.startedAt)
+    }
+
+    func testRunSavedByOlderVersionDecodesWithoutAllowIdle() throws {
+        let json = #"{"id":"6F1C8A52-7D0C-4F47-9E5C-0E6A7E9B1D11","title":"t","source":"custom","startedAt":0,"plannedSeconds":60}"#
+        let run = try JSONDecoder().decode(FocusRun.self, from: Data(json.utf8))
+        XCTAssertFalse(run.allowIdle)
+    }
+
     func testAdjustDoesNothingWhenIdle() {
         XCTAssertFalse(makeEngine().adjust(by: 300))
     }

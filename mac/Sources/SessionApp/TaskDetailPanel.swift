@@ -10,14 +10,19 @@ struct TaskDetailPanel: View {
     let canStart: Bool
     /// 分类 profile / 全局默认时长（秒）。
     let defaultSeconds: Int
-    /// 参数是选定的专注秒数。
-    let onStart: (Int) -> Void
+    /// 参数是选定的专注秒数和是否可闲置。
+    let onStart: (Int, Bool) -> Void
     let onClose: () -> Void
     /// 选定时长变化时回调（时间轴据此预览结束时间）。
     var onChoose: (Int) -> Void = { _ in }
     var onPickCategory: (String?) -> Void = { _ in }
 
     @State private var seconds: Int?
+    /// nil = 跟随任务标签。
+    @State private var allowIdle: Bool?
+    private var idleOn: Binding<Bool> {
+        Binding(get: { allowIdle ?? IdleTag.matches(task) }, set: { allowIdle = $0 })
+    }
 
     private var taskSeconds: Int? { task.durationMinutes.flatMap { $0 > 0 ? $0 * 60 : nil } }
     /// 可选时长（秒）：常用档位 + 默认值 + 任务自己的时长。
@@ -91,17 +96,19 @@ struct TaskDetailPanel: View {
             Rectangle().fill(Ink.rule).frame(height: 1)
             HStack(spacing: 6) {
                 ForEach(options, id: \.self) { s in InkChip(text: Ink.chip(s), selected: s == chosen) { seconds = s } }
+                Rectangle().fill(Ink.rule).frame(width: 1, height: 16).padding(.horizontal, 4)
+                IdleToggle(isOn: idleOn)
                 Spacer(minLength: 8)
                 if !canStart { Text("专注进行中").font(.inkMono(10)).foregroundStyle(Ink.sub) }
-                Button { onStart(chosen) } label: {
-                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注 \(Ink.duration(chosen))") }
+                Button { onStart(chosen, idleOn.wrappedValue) } label: {
+                    HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注") }
                 }
-                .buttonStyle(.inkPrimary).disabled(!canStart)
+                .buttonStyle(.inkPrimary).fixedSize().disabled(!canStart)
             }
         }
         .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .onChange(of: task.id) { _, _ in seconds = nil }
+        .onChange(of: task.id) { _, _ in seconds = nil; allowIdle = nil }
         .onChange(of: chosen, initial: true) { _, v in onChoose(v) }
     }
 

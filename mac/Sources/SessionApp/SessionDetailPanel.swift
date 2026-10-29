@@ -62,6 +62,8 @@ struct SessionDetailPanel: View {
                             Text(cat.name).font(.inkMono(11)).foregroundStyle(Ink.sub)
                         }
                     }
+                    IdleToggle(isOn: Binding(get: { session.allowIdle },
+                                             set: { model.setAllowIdle($0, forSession: session.id) }))
                     Text(session.syncState == .pending ? "未同步" : "已同步").font(.inkMono(11))
                         .foregroundStyle(session.syncState == .pending ? Ink.now : Ink.faint)
                     if let task, let onShowTask {
@@ -146,7 +148,7 @@ struct SessionDetailPanel: View {
                     .font(.inkMono(11)).foregroundStyle(Ink.sub).fixedSize()
             }
             HStack(alignment: .top, spacing: 12) {
-                Text("开始时间不变；缩短时会裁掉之后的活动记录。改完会重新同步，已有评估不会自动重算。")
+                Text("开始时间不变；缩短时会裁掉之后的活动记录。改完会重新同步，已有评估不会自动重算（改「可闲置」会）。")
                     .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button { confirmingDelete = true } label: { Text("删除").foregroundStyle(Ink.now) }
@@ -253,13 +255,16 @@ struct SessionDetailPanel: View {
     private var usageRows: [Usage] {
         var sums: [String: (TimeInterval, Bool, Bool)] = [:]
         for s in spans {
-            let name = s.kind == .idle ? "闲置" : (s.appName ?? "未知")
+            let name = s.kind == .idle ? idleName : (s.appName ?? "未知")
             let prev = sums[name] ?? (0, s.kind == .idle, false)
             sums[name] = (prev.0 + s.duration, prev.1, prev.2 || s.wasBlocked)
         }
         return sums.map { Usage(id: $0.key, seconds: $0.value.0, idle: $0.value.1, blocked: $0.value.2) }
             .sorted { $0.seconds > $1.seconds }
     }
+
+    /// 可闲置的专注里，闲置多半是离开电脑在做事。
+    private var idleName: String { session.allowIdle ? "离开电脑" : "闲置" }
 
     private var blockedCount: Int? { spans.isEmpty ? nil : spans.filter(\.wasBlocked).count }
 
@@ -317,7 +322,7 @@ struct SessionDetailPanel: View {
     }
 
     private func detail(_ span: ActivitySpan) -> String {
-        if span.kind == .idle { return "闲置" }
+        if span.kind == .idle { return idleName }
         let extra = [span.urlHost, span.windowTitle].compactMap { $0 }.first
         let base = [span.appName ?? "未知", extra].compactMap { $0 }.joined(separator: " — ")
         return span.wasBlocked ? "\(base)（已拦截）" : base

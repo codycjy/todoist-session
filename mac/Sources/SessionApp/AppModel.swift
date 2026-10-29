@@ -293,25 +293,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `seconds` 为 nil 时用分类 profile / 全局设置里的专注时长。
-    func startTask(_ task: TodoistTask, seconds: Int? = nil) {
+    /// `seconds` 为 nil 时用分类 profile / 全局设置里的专注时长；`allowIdle` 为 nil 时看任务有没有可闲置标签。
+    func startTask(_ task: TodoistTask, seconds: Int? = nil, allowIdle: Bool? = nil) {
         let categoryId = categoryId(for: task)
         begin(FocusSpec(title: task.content, categoryId: categoryId, source: .todoist,
-                        todoistTaskId: task.id, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId)))
+                        todoistTaskId: task.id, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId),
+                        allowIdle: allowIdle ?? IdleTag.matches(task)))
     }
 
-    func startEntry(_ entry: Entry, seconds: Int? = nil) {
+    func startEntry(_ entry: Entry, seconds: Int? = nil, allowIdle: Bool = false) {
         let started = begin(FocusSpec(title: entry.title, categoryId: entry.categoryId, source: .custom,
                                       todoistTaskId: nil, entryId: entry.id,
-                                      plannedSeconds: seconds ?? focusSeconds(for: entry.categoryId)))
+                                      plannedSeconds: seconds ?? focusSeconds(for: entry.categoryId), allowIdle: allowIdle))
         if started { remember(title: entry.title, categoryId: entry.categoryId) }
     }
 
-    func startCustom(title: String, categoryId: String?, seconds: Int? = nil) {
+    func startCustom(title: String, categoryId: String?, seconds: Int? = nil, allowIdle: Bool = false) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let started = begin(FocusSpec(title: title, categoryId: categoryId, source: .custom,
-                                      todoistTaskId: nil, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId)))
+                                      todoistTaskId: nil, entryId: nil, plannedSeconds: seconds ?? focusSeconds(for: categoryId),
+                                      allowIdle: allowIdle))
         if started { remember(title: title, categoryId: categoryId) }
     }
 
@@ -330,6 +332,12 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
+    /// 进行中切换可闲置（比如中途离开电脑去读纸质材料）。
+    func setAllowIdle(_ on: Bool) {
+        engine.setAllowIdle(on)
+        objectWillChange.send()
+    }
+
     /// 提前完成：按现在结束并照常记录；之后的休息时长不变。
     func finishEarly() {
         guard let done = engine.finishEarly() else { return }
@@ -342,25 +350,34 @@ final class AppModel: ObservableObject {
                                         kind: engine.suggestedBreak)
     }
 
-    /// 手动修改已完成专注的标题、分类和实际时长；改完重新上传（后端按 id 覆盖）。
-    func editSession(_ id: String, title: String, categoryId: String?, actualSeconds: Int) {
+    /// 手动修改已完成专注的标题、分类、实际时长和可闲置（nil = 不变）；改完重新上传（后端按 id 覆盖）。
+    /// 可闲置变了，后端会重新评估，本地先把旧评分清掉。
+    func editSession(_ id: String, title: String, categoryId: String?, actualSeconds: Int, allowIdle: Bool? = nil) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, actualSeconds > 0 else { return }
+        guard !title.isEmpty, actualSeconds > 0, let old = todaySessions.first(where: { $0.id == id }) else { return }
+        let allowIdle = allowIdle ?? old.allowIdle
+        if allowIdle != old.allowIdle { evaluations[id] = nil }
         if DemoData.enabled {   // 演示数据不在本地库里，直接改内存
             todaySessions = todaySessions.map { r in
                 r.id != id ? r : SessionRecord(id: r.id, title: title, categoryId: categoryId, source: r.source,
                                                todoistTaskId: r.todoistTaskId, entryId: r.entryId,
                                                plannedSeconds: r.plannedSeconds, actualSeconds: actualSeconds,
                                                startedAt: r.startedAt, endedAt: r.startedAt.addingTimeInterval(TimeInterval(actualSeconds)),
-                                               syncState: .pending)
+                                               allowIdle: allowIdle, syncState: .pending)
             }
             return
         }
-        do { try store?.edit(sessionId: id, title: title, categoryId: categoryId, actualSeconds: actualSeconds) }
+        do { try store?.edit(sessionId: id, title: title, categoryId: categoryId, actualSeconds: actualSeconds, allowIdle: allowIdle) }
         catch { errorMessage = "保存修改失败：\(error.localizedDescription)"; return }
         reloadToday()
         unsynced = (try? store?.pendingCount()) ?? unsynced
         Task { await flushSync() }
+    }
+
+    /// 事后改可闲置：其余字段不变，触发重新评估。
+    func setAllowIdle(_ on: Bool, forSession id: String) {
+        guard let r = todaySessions.first(where: { $0.id == id }) else { return }
+        editSession(id, title: r.title, categoryId: r.categoryId, actualSeconds: r.actualSeconds, allowIdle: on)
     }
 
     /// 删除一次已完成的专注（含活动记录）；后端的那份在下次同步时删掉。

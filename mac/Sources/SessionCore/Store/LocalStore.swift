@@ -34,6 +34,9 @@ public final class LocalStore: @unchecked Sendable {
         migrator.registerMigration("v2-deletions") { db in
             try db.execute(sql: "CREATE TABLE deletions (id TEXT PRIMARY KEY)")
         }
+        migrator.registerMigration("v3-allow-idle") { db in
+            try db.execute(sql: "ALTER TABLE sessions ADD COLUMN allow_idle INTEGER NOT NULL DEFAULT 0")
+        }
         try migrator.migrate(db)
     }
 
@@ -46,11 +49,11 @@ public final class LocalStore: @unchecked Sendable {
         try db.write { db in
             try db.execute(sql: """
                 INSERT OR IGNORE INTO sessions(id, title, category_id, source, todoist_task_id, entry_id,
-                  planned_seconds, actual_seconds, started_at, ended_at, sync_state)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                  planned_seconds, actual_seconds, started_at, ended_at, allow_idle, sync_state)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """, arguments: [r.id, r.title, r.categoryId, r.source.rawValue, r.todoistTaskId, r.entryId,
                                  r.plannedSeconds, r.actualSeconds, Self.ms(r.startedAt), Self.ms(r.endedAt),
-                                 r.syncState.rawValue])
+                                 r.allowIdle, r.syncState.rawValue])
         }
     }
 
@@ -82,15 +85,15 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
-    /// 手动编辑已完成的专注：改标题、分类和实际时长（结束时间 = 开始 + 时长）。
+    /// 手动编辑已完成的专注：改标题、分类、实际时长（结束时间 = 开始 + 时长）和可闲置。
     /// 新结束时间之后的 span 删掉、跨过它的截断；标记为待上传，后端按 id 覆盖。
-    public func edit(sessionId: String, title: String, categoryId: String?, actualSeconds: Int) throws {
+    public func edit(sessionId: String, title: String, categoryId: String?, actualSeconds: Int, allowIdle: Bool) throws {
         try db.write { db in
             guard let start = try Int64.fetchOne(db, sql: "SELECT started_at FROM sessions WHERE id = ?",
                                                  arguments: [sessionId]) else { return }
             let end = start + Int64(actualSeconds) * 1000
-            try db.execute(sql: "UPDATE sessions SET title = ?, category_id = ?, actual_seconds = ?, ended_at = ?, sync_state = 'pending' WHERE id = ?",
-                           arguments: [title, categoryId, actualSeconds, end, sessionId])
+            try db.execute(sql: "UPDATE sessions SET title = ?, category_id = ?, actual_seconds = ?, ended_at = ?, allow_idle = ?, sync_state = 'pending' WHERE id = ?",
+                           arguments: [title, categoryId, actualSeconds, end, allowIdle, sessionId])
             try db.execute(sql: "DELETE FROM spans WHERE session_id = ? AND started_at >= ?", arguments: [sessionId, end])
             try db.execute(sql: "UPDATE spans SET ended_at = ? WHERE session_id = ? AND ended_at > ?",
                            arguments: [end, sessionId, end])
@@ -173,6 +176,7 @@ public final class LocalStore: @unchecked Sendable {
                       todoistTaskId: r["todoist_task_id"], entryId: r["entry_id"],
                       plannedSeconds: r["planned_seconds"], actualSeconds: r["actual_seconds"],
                       startedAt: date(r["started_at"]), endedAt: date(r["ended_at"]),
+                      allowIdle: r["allow_idle"],
                       syncState: SyncState(rawValue: r["sync_state"]) ?? .pending)
     }
 
