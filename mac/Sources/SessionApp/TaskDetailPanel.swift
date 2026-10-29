@@ -11,6 +11,8 @@ struct TaskDetailPanel: View {
     /// 参数是选定的专注秒数。
     let onStart: (Int) -> Void
     let onClose: () -> Void
+    /// 选定时长变化时回调（时间轴据此预览结束时间）。
+    var onChoose: (Int) -> Void = { _ in }
 
     @State private var seconds: Int?
 
@@ -90,6 +92,7 @@ struct TaskDetailPanel: View {
         .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
         .onChange(of: task.id) { _, _ in seconds = nil }
+        .onChange(of: chosen, initial: true) { _, v in onChoose(v) }
     }
 
     private var description: some View {

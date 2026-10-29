@@ -12,6 +12,8 @@ struct TodayView: View {
     @State private var selectedTaskId: String? = DemoData.selectedTaskId
     /// 时间轴上点开的专注块；与选中任务互斥，底部同一时间只有一个详情面板。
     @State private var selectedSessionId: String? = DemoData.selectedSessionId
+    /// 任务详情里选定的时长，时间轴预览用。
+    @State private var taskSeconds: Int?
     @FocusState private var composerFocused: Bool
     @AppStorage("layout.timelineWidth") private var timelineWidth = 340.0
 
@@ -90,7 +92,8 @@ struct TodayView: View {
                 TaskDetailPanel(task: task, category: category(of: task), canStart: idle,
                                 defaultSeconds: model.focusSeconds(for: model.categoryId(for: task)),
                                 onStart: { secs in model.startTask(task, seconds: secs); selectedTaskId = nil },
-                                onClose: { select(task: nil) })
+                                onClose: { select(task: nil) },
+                                onChoose: { taskSeconds = $0 })
                     .padding(.horizontal, 32).padding(.bottom, 20)
                     .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             } else if let session = selectedSession {
@@ -274,10 +277,25 @@ struct TodayView: View {
             FocusTimelineView(sessions: model.todaySessions,
                               tasks: model.tasks,
                               selectedTaskId: selectedTaskId, selectedSessionId: selectedSessionId,
+                              ghost: ghost,
                               onSelectTask: { select(task: $0.id) },
                               onSelectSession: { s in select(session: selectedSessionId == s.id ? nil : s.id) })
         }
         .background(Ink.shelf)
+    }
+
+    /// 专注中：进行中的这一段；空闲：现在开始的话会占到哪（选中任务时按任务详情里的时长）。
+    private var ghost: TimelineGhost? {
+        switch model.engine.phase {
+        case .focusing(let run): return .running(run)
+        case .idle:
+            if let task = selectedTask {
+                return .next(title: task.content,
+                             seconds: taskSeconds ?? model.focusSeconds(for: model.categoryId(for: task)))
+            }
+            return .next(title: trimmedTitle.isEmpty ? "下一次专注" : trimmedTitle, seconds: effectiveSeconds)
+        default: return nil
+        }
     }
 
     private func legend(dashed: Bool, _ text: String) -> some View {

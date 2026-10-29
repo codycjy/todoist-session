@@ -1,14 +1,37 @@
 import SwiftUI
 import SessionCore
 
+/// 时间轴上的预览块：进行中的专注，或「现在开始的话」下一次专注会占到哪里。
+enum TimelineGhost: Equatable {
+    case running(FocusRun)
+    case next(title: String, seconds: Int)
+
+    func interval(now: Date) -> DateInterval {
+        switch self {
+        case .running(let run): DateInterval(start: run.startedAt, end: max(run.endAt, now))
+        case .next(_, let seconds): DateInterval(start: now, duration: TimeInterval(seconds))
+        }
+    }
+
+    /// 预计结束时间（进行中且已超时时就是计划结束时间）。
+    func end(now: Date) -> Date {
+        switch self {
+        case .running(let run): run.endAt
+        case .next(_, let seconds): now.addingTimeInterval(TimeInterval(seconds))
+        }
+    }
+}
+
 /// 今日时间轴。类型名避开 SwiftUI 自带的 `TimelineView`。
 /// 左列：Todoist 带具体时间的任务（计划，虚线框）；右列：实际专注块（荧光黄）。
+/// `ghost` 画在右列，并在结束时间画一条贯穿两列的虚线，方便和左边的计划对照。
 struct FocusTimelineView: View {
     @EnvironmentObject var model: AppModel
     let sessions: [SessionRecord]
     let tasks: [TodoistTask]
     var selectedTaskId: String?
     var selectedSessionId: String?
+    var ghost: TimelineGhost?
     var onSelectTask: (TodoistTask) -> Void = { _ in }
     var onSelectSession: (SessionRecord) -> Void = { _ in }
 
@@ -36,7 +59,9 @@ struct FocusTimelineView: View {
 
     @ViewBuilder private func content(now: Date) -> some View {
         let scheduled = scheduled
-        let range = TimelineLayout.range(sessions: sessions, scheduled: scheduled.map(\.interval), now: now)
+        let ghostInterval = ghost?.interval(now: now)
+        let range = TimelineLayout.range(sessions: sessions,
+                                         scheduled: scheduled.map(\.interval) + (ghostInterval.map { [$0] } ?? []), now: now)
         let blocks = TimelineLayout.blocks(sessions: sessions, rangeStart: range.start, pointsPerMinute: pointsPerMinute,
                                            minHeight: 10)
         let totalHeight = range.end.timeIntervalSince(range.start) / 60 * pointsPerMinute
@@ -74,6 +99,15 @@ struct FocusTimelineView: View {
                             blockView(session, block)
                                 .frame(width: doneWidth)
                                 .offset(x: gutter + 4 + planWidth + 6, y: block.top)
+                        }
+                        if let ghost, let ghostInterval {
+                            let box = TimelineLayout.block(for: ghostInterval, rangeStart: range.start,
+                                                           pointsPerMinute: pointsPerMinute, minHeight: 10)
+                            ghostView(ghost, now: now, height: box.height)
+                                .frame(width: doneWidth)
+                                .offset(x: gutter + 4 + planWidth + 6, y: box.top)
+                            let end = ghost.end(now: now)
+                            endLine(end).offset(y: end.timeIntervalSince(range.start) / 60 * pointsPerMinute - 6.5)
                         }
                         // 现在线：左侧时间小签 + 一条横线。
                         HStack(spacing: 0) {
@@ -162,6 +196,55 @@ struct FocusTimelineView: View {
         .help("\(session.title) · \(Ink.duration(session.actualSeconds))")
     }
 
+    /// 下一次：虚线框 + 淡黄底；进行中：已过去的部分实心黄，剩余部分虚线。
+    private func ghostView(_ ghost: TimelineGhost, now: Date, height: Double) -> some View {
+        let interval = ghost.interval(now: now)
+        let title: String, caption: String, elapsed: Double
+        switch ghost {
+        case .running(let run):
+            title = run.title
+            caption = "进行中 · 到 \(Ink.hm(run.endAt))"
+            elapsed = min(1, max(0, now.timeIntervalSince(interval.start) / max(interval.duration, 1)))
+        case .next(let t, let seconds):
+            title = t
+            caption = "现在开始 · \(Ink.hm(interval.start))–\(Ink.hm(interval.end)) · \(seconds / 60) 分钟"
+            elapsed = 0
+        }
+        return VStack(alignment: .leading, spacing: 1) {
+            if height >= Self.compactHeight {
+                Text(title).font(.ink(11, weight: .semibold)).lineLimit(1)
+            }
+            if height >= 38 { Text(caption).font(.inkMono(9.5)).opacity(0.75).lineLimit(2) }
+        }
+        .padding(.horizontal, 6).padding(.vertical, height >= Self.compactHeight ? 3 : 0)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
+        // 文字压在实心部分上时用黄底配色，否则用正文色（深色模式下淡黄底上的深色字看不清）。
+        .foregroundStyle(height * elapsed >= 30 ? Ink.onHighlight : Ink.ink)
+        .background(alignment: .top) {
+            VStack(spacing: 0) {
+                Rectangle().fill(Ink.highlight).frame(height: height * elapsed)
+                Rectangle().fill(Ink.highlight.opacity(0.3))
+            }
+        }
+        .overlay(Rectangle().strokeBorder(Ink.ink.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+        .help(caption)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 预计结束时间：左侧描边小签 + 贯穿两列的虚线。
+    private func endLine(_ end: Date) -> some View {
+        HStack(spacing: 0) {
+            Text(Ink.hm(end)).font(.inkMono(9, weight: .bold)).foregroundStyle(Ink.onHighlight)
+                .padding(.horizontal, 3).padding(.vertical, 1)
+                .background(Ink.highlight)
+                .overlay(Rectangle().strokeBorder(Ink.ink, lineWidth: 1))
+                .frame(width: gutter, alignment: .trailing)
+            Line().stroke(Ink.ink, style: StrokeStyle(lineWidth: 1, dash: [4, 3])).frame(height: 1)
+        }
+        .help("预计 \(Ink.hm(end)) 结束")
+        .accessibilityLabel("预计 \(Ink.hm(end)) 结束")
+    }
+
     @ViewBuilder private func badge(_ session: SessionRecord) -> some View {
         if session.syncState == .pending {
             Image(systemName: "icloud.slash").font(.ink(9))
@@ -172,6 +255,12 @@ struct FocusTimelineView: View {
                 .foregroundStyle(Ink.highlight).background(Ink.onHighlight)
                 .help("专注度评分").accessibilityLabel("专注度 \(badge)")
         }
+    }
+}
+
+private struct Line: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { p in p.move(to: CGPoint(x: 0, y: rect.midY)); p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)) }
     }
 }
 
