@@ -17,18 +17,26 @@ final class TimelineLayoutTests: XCTestCase {
                       plannedSeconds: 1500, actualSeconds: Int(to.timeIntervalSince(from)), startedAt: from, endedAt: to)
     }
 
-    func testRangeStartsAtEarliestSessionHourAndEndsAfterNowHour() {
+    private var midnight: Date { cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: date(12, 0)))! }
+
+    func testRangeStartsAtEarliestSessionHourAndRunsToEndOfDay() {
         let sessions = [session("a", from: date(10, 20), to: date(10, 45)), session("b", from: date(13, 5), to: date(13, 30))]
         let r = TimelineLayout.range(sessions: sessions, now: date(14, 10), calendar: cal)
         XCTAssertEqual(r.start, date(10, 0))
-        XCTAssertEqual(r.end, date(15, 0))
+        XCTAssertEqual(r.end, midnight, "the rest of the day is drawn even with nothing scheduled")
+    }
+
+    func testRangeExtendsPastMidnightForLateItems() {
+        let task = DateInterval(start: date(23, 30), duration: 60 * 60)
+        let r = TimelineLayout.range(sessions: [], scheduled: [task], now: date(14, 10), calendar: cal)
+        XCTAssertEqual(r.end, midnight.addingTimeInterval(3600))
     }
 
     func testScheduledTasksExtendRange() {
         let task = DateInterval(start: date(16, 0), duration: 45 * 60)
         let r = TimelineLayout.range(sessions: [], scheduled: [task], now: date(14, 10), calendar: cal)
         XCTAssertEqual(r.start, date(14, 0))
-        XCTAssertEqual(r.end, date(17, 0))
+        XCTAssertEqual(r.end, midnight)
     }
 
     func testBlockForInterval() {
@@ -41,10 +49,10 @@ final class TimelineLayoutTests: XCTestCase {
     func testRangeWithoutSessionsStartsNoLaterThanNineAndNowHour() {
         let late = TimelineLayout.range(sessions: [], now: date(14, 10), calendar: cal)
         XCTAssertEqual(late.start, date(9, 0))
-        XCTAssertEqual(late.end, date(15, 0))
+        XCTAssertEqual(late.end, midnight)
         let early = TimelineLayout.range(sessions: [], now: date(7, 30), calendar: cal)
         XCTAssertEqual(early.start, date(7, 0))
-        XCTAssertEqual(early.end, date(8, 0))
+        XCTAssertEqual(early.end, midnight)
     }
 
     func testBlockTopAndHeightUsePointsPerMinute() {

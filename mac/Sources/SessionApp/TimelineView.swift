@@ -57,6 +57,9 @@ struct FocusTimelineView: View {
         }
     }
 
+    /// 「现在」停在视口约三分之一处：上面看已完成的，下面看今天剩下的。
+    private static let nowAnchor = UnitPoint(x: 0.5, y: 0.3)
+
     @ViewBuilder private func content(now: Date) -> some View {
         let scheduled = scheduled
         let ghostInterval = ghost?.interval(now: now)
@@ -126,8 +129,8 @@ struct FocusTimelineView: View {
                 }
                 .frame(height: totalHeight + 26)
             }
-            .onAppear { DispatchQueue.main.async { proxy.scrollTo("now", anchor: .top) } }
-            .onChange(of: sessions.count) { _, _ in proxy.scrollTo("now", anchor: .top) }
+            .onAppear { DispatchQueue.main.async { proxy.scrollTo("now", anchor: Self.nowAnchor) } }
+            .onChange(of: sessions.count) { _, _ in proxy.scrollTo("now", anchor: Self.nowAnchor) }
         }
     }
 
