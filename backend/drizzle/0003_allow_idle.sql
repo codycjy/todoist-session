@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `allow_idle` integer DEFAULT false NOT NULL;

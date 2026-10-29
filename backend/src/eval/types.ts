@@ -31,6 +31,8 @@ export interface EvalInput {
   /** 毫秒时间戳 */
   startedAt: number
   endedAt: number
+  /** 用户标记任务有一部分离开电脑做：IDLE 不算分心 */
+  allowIdle?: boolean
   spans: EvalSpan[]
 }
 

@@ -22,6 +22,13 @@
       "when": 1792970503991,
       "tag": "0002_puzzling_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793279902773,
+      "tag": "0003_allow_idle",
+      "breakpoints": true
     }
   ]
 }

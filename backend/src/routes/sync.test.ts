@@ -56,6 +56,25 @@ it('re-uploading an edited session updates title, duration and spans', async () 
   expect(spans.map((p) => [p.id, p.endedAt.getTime()])).toEqual([['s1-a', 1_400]])
 })
 
+it('stores allowIdle, defaulting to false for older clients', async () => {
+  const { app, db } = makeTestApp()
+  await app.request('/sync/sessions', post({ sessions: [session('a', { allowIdle: true }), session('b')] }))
+  const rows = db.select().from(sessions).all()
+  expect(rows.map((r) => [r.id, r.allowIdle])).toEqual([['a', true], ['b', false]])
+})
+
+it('re-queues the evaluation only when allowIdle changes on re-upload', async () => {
+  const { app, db } = makeTestApp()
+  await app.request('/sync/sessions', post({ sessions: [session('s1')] }))
+  const done = { status: 'done' as const, attempts: 1, focusScore: 40 }
+  db.update(evaluations).set(done).run()
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { title: '改名' })] }))
+  expect(db.select().from(evaluations).get()).toMatchObject(done)
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { allowIdle: true })] }))
+  expect(db.select().from(evaluations).get()).toMatchObject({ status: 'pending', attempts: 0 })
+  expect(db.select().from(sessions).get()?.allowIdle).toBe(true)
+})
+
 it('nulls out a category that does not exist or belongs to someone else', async () => {
   const { app, db } = makeTestApp()
   db.insert(users).values({ id: 'u2', name: 'other', apiTokenHash: hashToken('x'), createdAt: new Date() }).run()

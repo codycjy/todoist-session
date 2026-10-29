@@ -89,6 +89,11 @@ describe('buildUserPrompt', () => {
     expect(p).toContain('未分类')
     expect(p).toContain('(no activity recorded)')
   })
+
+  it('says so when the task allows idle time, and stays silent otherwise', () => {
+    expect(buildUserPrompt({ ...input, allowIdle: true })).toContain('Idle allowed: yes')
+    expect(buildUserPrompt(input)).not.toContain('Idle allowed')
+  })
 })
 
 describe('prompt hardening', () => {

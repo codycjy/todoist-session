@@ -36,6 +36,7 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
       actualSeconds: s.actualSeconds,
       startedAt: s.startedAt.getTime(),
       endedAt: s.endedAt.getTime(),
+      allowIdle: s.allowIdle,
       spans: spans.map((p) => ({
         kind: p.kind, appBundleId: p.appBundleId, appName: p.appName, windowTitle: p.windowTitle,
         urlHost: p.urlHost, startedAt: p.startedAt.getTime(), endedAt: p.endedAt.getTime(), wasBlocked: p.wasBlocked,

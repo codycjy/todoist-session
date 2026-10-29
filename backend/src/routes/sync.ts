@@ -30,6 +30,7 @@ const sessionSchema = z.object({
   actualSeconds: z.number().int().nonnegative(),
   startedAt: ms,
   endedAt: ms,
+  allowIdle: z.boolean().default(false), // 旧客户端不传
   spans: z.array(spanSchema).max(5000),
 })
 const bodySchema = z.object({ sessions: z.array(sessionSchema).min(1).max(50) })
@@ -71,7 +72,7 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
       if (!timesOk) { rejected.push({ id: s.id, reason: 'INVALID_TIME' }); continue }
 
       const outcome = db.transaction((tx) => {
-        const existing = tx.select({ userId: sessions.userId }).from(sessions).where(eq(sessions.id, s.id)).get()
+        const existing = tx.select({ userId: sessions.userId, allowIdle: sessions.allowIdle }).from(sessions).where(eq(sessions.id, s.id)).get()
         if (existing && existing.userId !== userId) return 'conflict'
 
         const categoryId = s.categoryId &&
@@ -80,10 +81,17 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
           ? s.categoryId : null
 
         if (existing) {
-          // 重传 = 客户端编辑过（标题、分类、时长）：覆盖可编辑字段并替换 span；评估保留不重置。
+          // 重传 = 客户端编辑过（标题、分类、时长、可闲置）：覆盖可编辑字段并替换 span。
+          // 评估一般保留；只有「可闲置」变了才重评，因为它改变了闲置该怎么算。
           tx.update(sessions).set({
             titleSnapshot: s.title, categoryId, actualSeconds: s.actualSeconds, endedAt: new Date(s.endedAt),
+            allowIdle: s.allowIdle,
           }).where(eq(sessions.id, s.id)).run()
+          if (existing.allowIdle !== s.allowIdle) {
+            tx.update(evaluations)
+              .set({ status: 'pending', attempts: 0, lastError: null, updatedAt: new Date(opts.now()) })
+              .where(eq(evaluations.sessionId, s.id)).run()
+          }
           tx.delete(activitySpans).where(eq(activitySpans.sessionId, s.id)).run()
           insertSpans(tx, s)
           return 'ok'
@@ -97,7 +105,7 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
         tx.insert(sessions).values({
           id: s.id, userId, categoryId, source: s.source, todoistTaskId: s.todoistTaskId, entryId,
           titleSnapshot: s.title, plannedSeconds: s.plannedSeconds, actualSeconds: s.actualSeconds,
-          startedAt: new Date(s.startedAt), endedAt: new Date(s.endedAt),
+          startedAt: new Date(s.startedAt), endedAt: new Date(s.endedAt), allowIdle: s.allowIdle,
         }).run()
 
         const at = new Date(opts.now())

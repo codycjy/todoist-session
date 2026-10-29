@@ -48,6 +48,8 @@ export const sessions = sqliteTable(
     startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
     endedAt: integer('ended_at', { mode: 'timestamp_ms' }).notNull(),
     status: text('status', { enum: ['completed'] }).notNull().default('completed'),
+    // 用户标记「可闲置」：任务有一部分离开电脑做，评估时闲置不算分心
+    allowIdle: integer('allow_idle', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [index('sessions_user_started').on(t.userId, t.startedAt)],
 )

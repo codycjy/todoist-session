@@ -44,7 +44,7 @@ describe('eval worker', () => {
     expect(row(db, 's1').updatedAt.getTime()).toBe(99_000)
     expect(seen[0]).toMatchObject({
       title: 'task 1', categoryName: '工作', plannedSeconds: 1500, actualSeconds: 600,
-      startedAt: 10_000, endedAt: 610_000,
+      startedAt: 10_000, endedAt: 610_000, allowIdle: false,
     })
     expect(seen[0]!.spans).toEqual([expect.objectContaining({ appName: 'Xcode', startedAt: 10_000, endedAt: 70_000 })])
     expect(await w.runOnce()).toBe(0)
