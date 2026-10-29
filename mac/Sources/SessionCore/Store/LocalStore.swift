@@ -30,6 +30,10 @@ public final class LocalStore: @unchecked Sendable {
                 CREATE INDEX spans_session ON spans(session_id);
                 """)
         }
+        // 本地删除的 session id，等同步给后端后清掉（删除也要能离线进行）。
+        migrator.registerMigration("v2-deletions") { db in
+            try db.execute(sql: "CREATE TABLE deletions (id TEXT PRIMARY KEY)")
+        }
         try migrator.migrate(db)
     }
 
@@ -78,18 +82,38 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
-    /// 手动编辑已完成的专注：改标题和实际时长（结束时间 = 开始 + 时长）。
+    /// 手动编辑已完成的专注：改标题、分类和实际时长（结束时间 = 开始 + 时长）。
     /// 新结束时间之后的 span 删掉、跨过它的截断；标记为待上传，后端按 id 覆盖。
-    public func edit(sessionId: String, title: String, actualSeconds: Int) throws {
+    public func edit(sessionId: String, title: String, categoryId: String?, actualSeconds: Int) throws {
         try db.write { db in
             guard let start = try Int64.fetchOne(db, sql: "SELECT started_at FROM sessions WHERE id = ?",
                                                  arguments: [sessionId]) else { return }
             let end = start + Int64(actualSeconds) * 1000
-            try db.execute(sql: "UPDATE sessions SET title = ?, actual_seconds = ?, ended_at = ?, sync_state = 'pending' WHERE id = ?",
-                           arguments: [title, actualSeconds, end, sessionId])
+            try db.execute(sql: "UPDATE sessions SET title = ?, category_id = ?, actual_seconds = ?, ended_at = ?, sync_state = 'pending' WHERE id = ?",
+                           arguments: [title, categoryId, actualSeconds, end, sessionId])
             try db.execute(sql: "DELETE FROM spans WHERE session_id = ? AND started_at >= ?", arguments: [sessionId, end])
             try db.execute(sql: "UPDATE spans SET ended_at = ? WHERE session_id = ? AND ended_at > ?",
                            arguments: [end, sessionId, end])
+        }
+    }
+
+    /// 删除一次专注及其 span，并记下 id 等待同步给后端。
+    public func delete(sessionId: String) throws {
+        try db.write { db in
+            try db.execute(sql: "DELETE FROM spans WHERE session_id = ?", arguments: [sessionId])
+            try db.execute(sql: "DELETE FROM sessions WHERE id = ?", arguments: [sessionId])
+            try db.execute(sql: "INSERT OR IGNORE INTO deletions(id) VALUES (?)", arguments: [sessionId])
+        }
+    }
+
+    public func pendingDeletions(limit: Int) throws -> [String] {
+        try db.read { try String.fetchAll($0, sql: "SELECT id FROM deletions ORDER BY rowid LIMIT ?", arguments: [limit]) }
+    }
+
+    public func clearDeletions(_ ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        try db.write { db in
+            for id in ids { try db.execute(sql: "DELETE FROM deletions WHERE id = ?", arguments: [id]) }
         }
     }
 
@@ -134,8 +158,13 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// 待上传的 session + 待同步的删除。
     public func pendingCount() throws -> Int {
-        try db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM sessions WHERE sync_state = 'pending'") ?? 0 }
+        try db.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT (SELECT COUNT(*) FROM sessions WHERE sync_state = 'pending') + (SELECT COUNT(*) FROM deletions)
+                """) ?? 0
+        }
     }
 
     private static func record(_ r: Row) -> SessionRecord {

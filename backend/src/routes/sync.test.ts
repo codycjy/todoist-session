@@ -133,3 +133,46 @@ it('does not create an evaluation for a conflicting or invalid session', async (
   ] }))
   expect(db.select().from(evaluations).all()).toHaveLength(0)
 })
+
+it('re-uploading can change the category, still ignoring categories of other users', async () => {
+  const { app, db } = makeTestApp()
+  db.insert(users).values({ id: 'u2', name: 'other', apiTokenHash: hashToken('x'), createdAt: new Date() }).run()
+  db.insert(categories).values([
+    { id: 'c-mine', userId: 'u1', name: 'n', color: 'red' },
+    { id: 'c-other', userId: 'u2', name: 'n', color: 'red' },
+  ]).run()
+  await app.request('/sync/sessions', post({ sessions: [session('s1')] }))
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { categoryId: 'c-mine' })] }))
+  expect(db.select().from(sessions).get()?.categoryId).toBe('c-mine')
+  await app.request('/sync/sessions', post({ sessions: [session('s1', { categoryId: 'c-other' })] }))
+  expect(db.select().from(sessions).get()?.categoryId).toBeNull()
+})
+
+it('deletes own sessions with their spans and evaluation, acknowledging unknown ids', async () => {
+  const { app, db } = makeTestApp()
+  await app.request('/sync/sessions', post({ sessions: [session('s1'), session('s2')] }))
+  const res = await app.request('/sync/deletions', post({ ids: ['s1', 'never-uploaded'] }))
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ deleted: ['s1', 'never-uploaded'] })
+  expect(db.select().from(sessions).all().map((r) => r.id)).toEqual(['s2'])
+  expect(db.select().from(activitySpans).all().map((p) => p.sessionId)).toEqual(['s2'])
+  expect(db.select().from(evaluations).all().map((e) => e.sessionId)).toEqual(['s2'])
+})
+
+it("does not delete another user's session", async () => {
+  const { app, db } = makeTestApp()
+  db.insert(users).values({ id: 'u2', name: 'other', apiTokenHash: hashToken('x'), createdAt: new Date() }).run()
+  db.insert(sessions).values({
+    id: 'theirs', userId: 'u2', source: 'custom', titleSnapshot: 't', plannedSeconds: 1,
+    actualSeconds: 1, startedAt: new Date(1), endedAt: new Date(2),
+  }).run()
+  const res = await app.request('/sync/deletions', post({ ids: ['theirs'] }))
+  expect(await res.json()).toEqual({ deleted: ['theirs'] })
+  expect(db.select().from(sessions).all()).toHaveLength(1)
+})
+
+it('returns 400 for an empty or malformed deletion body', async () => {
+  const { app } = makeTestApp()
+  expect((await app.request('/sync/deletions', post({ ids: [] }))).status).toBe(400)
+  expect((await app.request('/sync/deletions', post({ nope: 1 }))).status).toBe(400)
+})

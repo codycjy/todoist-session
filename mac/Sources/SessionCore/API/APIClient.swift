@@ -82,6 +82,12 @@ public final class APIClient: @unchecked Sendable {
         return try await send("POST", "/sync/sessions", body: body)
     }
 
+    public func deleteSessions(_ ids: [String]) async throws -> [String] {
+        struct R: Decodable { let deleted: [String] }
+        let body = try JSONSerialization.data(withJSONObject: ["ids": ids])
+        return (try await send("POST", "/sync/deletions", body: body) as R).deleted
+    }
+
     public func sessions(from: Date, to: Date) async throws -> [RemoteSession] {
         struct R: Decodable { let sessions: [RemoteSession] }
         let r: R = try await send("GET", "/sessions", query: Self.rangeQuery(from: from, to: to))

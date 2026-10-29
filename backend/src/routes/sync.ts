@@ -33,6 +33,7 @@ const sessionSchema = z.object({
   spans: z.array(spanSchema).max(5000),
 })
 const bodySchema = z.object({ sessions: z.array(sessionSchema).min(1).max(50) })
+const deletionSchema = z.object({ ids: z.array(id).min(1).max(100) })
 
 type Rejection = { id: string; reason: 'CONFLICT' | 'INVALID_TIME' }
 const SPAN_CHUNK = 200 // 11 列 × 200 = 2200 个绑定参数，低于 SQLite 上限
@@ -71,21 +72,23 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
 
       const outcome = db.transaction((tx) => {
         const existing = tx.select({ userId: sessions.userId }).from(sessions).where(eq(sessions.id, s.id)).get()
+        if (existing && existing.userId !== userId) return 'conflict'
+
+        const categoryId = s.categoryId &&
+          tx.select({ id: categories.id }).from(categories)
+            .where(and(eq(categories.id, s.categoryId), eq(categories.userId, userId))).get()
+          ? s.categoryId : null
+
         if (existing) {
-          if (existing.userId !== userId) return 'conflict'
-          // 重传 = 客户端编辑过（标题、时长）：覆盖可编辑字段并替换 span；评估保留不重置。
+          // 重传 = 客户端编辑过（标题、分类、时长）：覆盖可编辑字段并替换 span；评估保留不重置。
           tx.update(sessions).set({
-            titleSnapshot: s.title, actualSeconds: s.actualSeconds, endedAt: new Date(s.endedAt),
+            titleSnapshot: s.title, categoryId, actualSeconds: s.actualSeconds, endedAt: new Date(s.endedAt),
           }).where(eq(sessions.id, s.id)).run()
           tx.delete(activitySpans).where(eq(activitySpans.sessionId, s.id)).run()
           insertSpans(tx, s)
           return 'ok'
         }
 
-        const categoryId = s.categoryId &&
-          tx.select({ id: categories.id }).from(categories)
-            .where(and(eq(categories.id, s.categoryId), eq(categories.userId, userId))).get()
-          ? s.categoryId : null
         const entryId = s.entryId &&
           tx.select({ id: entries.id }).from(entries)
             .where(and(eq(entries.id, s.entryId), eq(entries.userId, userId))).get()
@@ -111,6 +114,25 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
       else rejected.push({ id: s.id, reason: 'CONFLICT' })
     }
     return c.json({ accepted, rejected })
+  })
+
+  // 客户端删除的 session：连同 span 与评估一起删。不存在或属于别人的 id 也算处理完（幂等），
+  // 客户端据此清掉本地的删除记录。
+  r.post('/deletions', async (c) => {
+    const parsed = deletionSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'BAD_REQUEST' }, 400)
+    const userId = c.get('user').id
+    db.transaction((tx) => {
+      for (const sid of parsed.data.ids) {
+        const own = tx.select({ id: sessions.id }).from(sessions)
+          .where(and(eq(sessions.id, sid), eq(sessions.userId, userId))).get()
+        if (!own) continue
+        tx.delete(activitySpans).where(eq(activitySpans.sessionId, sid)).run()
+        tx.delete(evaluations).where(eq(evaluations.sessionId, sid)).run()
+        tx.delete(sessions).where(eq(sessions.id, sid)).run()
+      }
+    })
+    return c.json({ deleted: parsed.data.ids })
   })
 
   return r

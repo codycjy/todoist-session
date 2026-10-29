@@ -270,13 +270,13 @@ final class AppModel: ObservableObject {
                                         kind: engine.suggestedBreak)
     }
 
-    /// 手动修改已完成专注的标题和实际时长；改完重新上传（后端按 id 覆盖）。
-    func editSession(_ id: String, title: String, actualSeconds: Int) {
+    /// 手动修改已完成专注的标题、分类和实际时长；改完重新上传（后端按 id 覆盖）。
+    func editSession(_ id: String, title: String, categoryId: String?, actualSeconds: Int) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, actualSeconds > 0 else { return }
         if DemoData.enabled {   // 演示数据不在本地库里，直接改内存
             todaySessions = todaySessions.map { r in
-                r.id != id ? r : SessionRecord(id: r.id, title: title, categoryId: r.categoryId, source: r.source,
+                r.id != id ? r : SessionRecord(id: r.id, title: title, categoryId: categoryId, source: r.source,
                                                todoistTaskId: r.todoistTaskId, entryId: r.entryId,
                                                plannedSeconds: r.plannedSeconds, actualSeconds: actualSeconds,
                                                startedAt: r.startedAt, endedAt: r.startedAt.addingTimeInterval(TimeInterval(actualSeconds)),
@@ -284,8 +284,19 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        do { try store?.edit(sessionId: id, title: title, actualSeconds: actualSeconds) }
+        do { try store?.edit(sessionId: id, title: title, categoryId: categoryId, actualSeconds: actualSeconds) }
         catch { errorMessage = "保存修改失败：\(error.localizedDescription)"; return }
+        reloadToday()
+        unsynced = (try? store?.pendingCount()) ?? unsynced
+        Task { await flushSync() }
+    }
+
+    /// 删除一次已完成的专注（含活动记录）；后端的那份在下次同步时删掉。
+    func deleteSession(_ id: String) {
+        evaluations[id] = nil
+        if DemoData.enabled { todaySessions.removeAll { $0.id == id }; return }
+        do { try store?.delete(sessionId: id) }
+        catch { errorMessage = "删除失败：\(error.localizedDescription)"; return }
         reloadToday()
         unsynced = (try? store?.pendingCount()) ?? unsynced
         Task { await flushSync() }

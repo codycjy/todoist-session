@@ -6,10 +6,17 @@ final class FakeUploader: SessionUploading, @unchecked Sendable {
     var result: Result<SyncResult, Error> = .success(SyncResult(accepted: [], rejected: []))
     /// 为 nil 时接受全部。
     var respond: (([String]) -> Result<SyncResult, Error>)?
+    var deleteCalls: [[String]] = []
+    var deleteResult: Result<Void, Error> = .success(())
     func syncSessions(_ batch: [(session: SessionRecord, spans: [ActivitySpan])]) async throws -> SyncResult {
         let ids = batch.map(\.session.id)
         calls.append(ids)
         return try (respond?(ids) ?? result).get()
+    }
+    func deleteSessions(_ ids: [String]) async throws -> [String] {
+        deleteCalls.append(ids)
+        try deleteResult.get()
+        return ids
     }
 }
 
@@ -163,5 +170,27 @@ final class SyncServiceTests: XCTestCase {
         let outcome = await service.flush()
         XCTAssertEqual(outcome, .failed)
         XCTAssertEqual(uploader.calls.count, 1)
+    }
+
+    func testSendsQueuedDeletionsAndClearsThem() async throws {
+        try save("a", start: 1_000)
+        try store.markSynced(["a"])
+        try store.delete(sessionId: "a")
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .synced(accepted: 0, rejected: 0))
+        XCTAssertEqual(uploader.deleteCalls, [["a"]])
+        XCTAssertEqual(try store.pendingCount(), 0)
+        let again = await service.flush()
+        XCTAssertEqual(again, .nothingToSync)
+    }
+
+    func testFailedDeletionStaysQueuedAndBacksOff() async throws {
+        try save("a", start: 1_000)
+        try store.delete(sessionId: "a")
+        uploader.deleteResult = .failure(APIError.transport("offline"))
+        let outcome = await service.flush()
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(try store.pendingDeletions(limit: 10), ["a"])
+        XCTAssertFalse(service.isDue)
     }
 }

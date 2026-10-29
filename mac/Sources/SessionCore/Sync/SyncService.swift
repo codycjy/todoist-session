@@ -2,6 +2,8 @@ import Foundation
 
 public protocol SessionUploading: Sendable {
     func syncSessions(_ batch: [(session: SessionRecord, spans: [ActivitySpan])]) async throws -> SyncResult
+    /// 返回后端已处理的 id。
+    func deleteSessions(_ ids: [String]) async throws -> [String]
 }
 extension APIClient: SessionUploading {}
 
@@ -38,7 +40,7 @@ public final class SyncService: @unchecked Sendable {
     /// 是否到了可以重试的时间（给定时器用）。
     public var isDue: Bool { lock.withLock { clock.now >= nextAttempt } }
 
-    /// 上传一批待同步的 session。并发调用时后来者直接返回 .nothingToSync。
+    /// 先同步删除，再上传一批待同步的 session。并发调用时后来者直接返回 .nothingToSync。
     @discardableResult
     public func flush(force: Bool = false) async -> SyncOutcome {
         let proceed: Bool = lock.withLock {
@@ -50,8 +52,13 @@ public final class SyncService: @unchecked Sendable {
         defer { lock.withLock { running = false } }
 
         do {
+            let deletions = try store.pendingDeletions(limit: 100)
+            if !deletions.isEmpty { try store.clearDeletions(try await uploader.deleteSessions(deletions)) }
             let batch = try store.pending(limit: batchSize)
-            guard !batch.isEmpty else { return .nothingToSync }
+            guard !batch.isEmpty else {
+                if !deletions.isEmpty { lock.withLock { backoff.recordSuccess(); nextAttempt = .distantPast } }
+                return deletions.isEmpty ? .nothingToSync : .synced(accepted: 0, rejected: 0)
+            }
             var accepted = 0, rejected = 0
             do {
                 let result = try await uploader.syncSessions(batch)

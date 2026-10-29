@@ -11,10 +11,12 @@ struct SessionDetailPanel: View {
     let onClose: () -> Void
 
     @State private var showAllSpans = false
-    /// 编辑模式：标题与实际时长（分钟）的草稿。
+    /// 编辑模式：标题、分类与实际时长（分钟）的草稿。
     @State private var editing = false
     @State private var draftTitle = ""
+    @State private var draftCategoryId: String?
     @State private var draftMinutes = 0
+    @State private var confirmingDelete = false
 
     private var evaluation: Evaluation? { model.evaluations[session.id] }
     private var spans: [ActivitySpan] { model.spans(for: session.id) }
@@ -39,6 +41,12 @@ struct SessionDetailPanel: View {
         .inkPanel(padding: 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
         .onChange(of: session.id) { _, _ in showAllSpans = false; editing = false }
+        .confirmationDialog("删除这次专注？", isPresented: $confirmingDelete) {
+            Button("删除", role: .destructive) { model.deleteSession(session.id); onClose() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("「\(session.title)」和它的活动记录会从本机和后端一起删除，统计里也不再计入。")
+        }
         .onAppear { if DemoData.editsSession { beginEdit() } }
     }
 
@@ -81,7 +89,7 @@ struct SessionDetailPanel: View {
             if !editing {
                 Button(action: beginEdit) { Image(systemName: "pencil").font(.ink(12, weight: .semibold)) }
                     .buttonStyle(.plain).foregroundStyle(Ink.sub)
-                    .help("编辑标题和时长")
+                    .help("编辑标题、分类和时长")
                     .accessibilityLabel("编辑")
             }
             Button(action: onClose) { Image(systemName: "xmark").font(.ink(11, weight: .semibold)) }
@@ -95,6 +103,7 @@ struct SessionDetailPanel: View {
 
     private func beginEdit() {
         draftTitle = session.title
+        draftCategoryId = session.categoryId
         draftMinutes = max(1, Int((Double(session.actualSeconds) / 60).rounded()))
         editing = true
     }
@@ -103,7 +112,7 @@ struct SessionDetailPanel: View {
 
     private func save() {
         guard canSave else { return }
-        model.editSession(session.id, title: draftTitle, actualSeconds: min(max(draftMinutes, 1), 600) * 60)
+        model.editSession(session.id, title: draftTitle, categoryId: draftCategoryId, actualSeconds: min(max(draftMinutes, 1), 600) * 60)
         editing = false
     }
 
@@ -112,6 +121,10 @@ struct SessionDetailPanel: View {
             TextField("标题", text: $draftTitle)
                 .textFieldStyle(InkFieldStyle(size: 16))
                 .onSubmit(save)
+            HStack(spacing: 12) {
+                Text("分类").font(.inkMono(10)).foregroundStyle(Ink.faint).fixedSize()
+                categoryPicker
+            }
             HStack(spacing: 12) {
                 Text("实际").font(.inkMono(10)).foregroundStyle(Ink.faint).fixedSize()
                 HStack(spacing: 0) {
@@ -136,11 +149,39 @@ struct SessionDetailPanel: View {
                 Text("开始时间不变；缩短时会裁掉之后的活动记录。改完会重新同步，已有评估不会自动重算。")
                     .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
+                Button { confirmingDelete = true } label: { Text("删除").foregroundStyle(Ink.now) }
+                    .buttonStyle(InkButtonStyle(kind: .quiet, compact: true)).fixedSize()
                 Button("取消") { editing = false }.buttonStyle(InkButtonStyle(compact: true)).fixedSize()
                 Button("保存", action: save).buttonStyle(InkButtonStyle(kind: .primary, compact: true)).fixedSize()
                     .disabled(!canSave)
             }
         }
+    }
+
+    /// 可选分类：未归档的分类；原分类已归档时也保留在列表里，免得一打开编辑就被换掉。
+    private var categoryChoices: [Category] {
+        var list = model.categories
+        if let id = session.categoryId, !list.contains(where: { $0.id == id }), let old = model.category(for: id) {
+            list.append(old)
+        }
+        return list
+    }
+
+    private var categoryPicker: some View {
+        Menu {
+            Button("无分类") { draftCategoryId = nil }
+            ForEach(categoryChoices) { c in Button(c.name) { draftCategoryId = c.id } }
+        } label: {
+            HStack(spacing: 5) {
+                CategoryMark(color: model.category(for: draftCategoryId).map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 7)
+                Text(model.category(for: draftCategoryId)?.name ?? "无分类").font(.inkMono(11))
+                Image(systemName: "chevron.down").font(.ink(8, weight: .bold))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .overlay(Rectangle().strokeBorder(Ink.rule, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
     }
 
     /// 评分方块：完成时荧光黄底大号数字，其余状态是细框小字。
