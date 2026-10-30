@@ -59,7 +59,8 @@ final class AppModel: ObservableObject {
             defaults.set(["com.tencent.xinWeChat", "com.hnc.Discord"], forKey: "settings.blockApps")
             defaults.set(["youtube.com", "bilibili.com", "x.com"], forKey: "settings.blockDomains")
             let coding = ["c-work": CategoryProfile(focusSeconds: 3000, breakSeconds: 1500, inheritBlocklist: true,
-                                                    blockApps: ["com.apple.Music"], blockDomains: ["news.ycombinator.com"])]
+                                                    blockApps: ["com.apple.Music"], blockDomains: ["news.ycombinator.com"],
+                                                    startShortcut: "专注歌单")]
             defaults.set(try? JSONEncoder().encode(coding), forKey: "settings.profiles")
         }
         self.defaults = defaults
@@ -322,7 +323,7 @@ final class AppModel: ObservableObject {
         let run = currentRun
         tracker?.discard(); stopSampling(); Browser.restoreAll()
         engine.abandon(); objectWillChange.send()
-        if let run { runShortcut(Shortcuts.endName, event: "abandon", run: run, actualSeconds: nil) }
+        if let run { runShortcut(start: false, event: "abandon", run: run, actualSeconds: nil) }
     }
 
     /// 进行中的专注加减分钟。
@@ -494,7 +495,7 @@ final class AppModel: ObservableObject {
                 guard !DemoData.enabled else { return true }
                 tracker = Self.makeTracker(store: store, settings: settings.effective, categoryId: run.categoryId)
                 tracker?.start(run: run); startSampling()
-                runShortcut(Shortcuts.startName, event: "start", run: run, actualSeconds: nil)
+                runShortcut(start: true, event: "start", run: run, actualSeconds: nil)
                 Task { await Notifier.requestAuthorization() }   // 开始时就问，免得到点才弹授权框
             }
             return true
@@ -515,7 +516,7 @@ final class AppModel: ObservableObject {
     private func complete(_ done: CompletedFocus, live: Bool, notify: Bool = true) {
         tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
         lastCompletedCategoryId = done.run.categoryId
-        if live { runShortcut(Shortcuts.endName, event: "complete", run: done.run, actualSeconds: done.actualSeconds) }
+        if live { runShortcut(start: false, event: "complete", run: done.run, actualSeconds: done.actualSeconds) }
         do { try store?.save(SessionRecord(done)) }
         catch { errorMessage = "保存专注记录失败：\(error.localizedDescription)" }
         pendingCompletion = done
@@ -525,7 +526,10 @@ final class AppModel: ObservableObject {
         Task { await flushSync() }
     }
 
-    private func runShortcut(_ name: String, event: String, run: FocusRun, actualSeconds: Int?) {
+    /// 分类 profile 指定了快捷指令就运行它，否则运行全局的 session_start / session_end。
+    private func runShortcut(start: Bool, event: String, run: FocusRun, actualSeconds: Int?) {
+        let name = settings.effective.shortcut(for: run.categoryId, start: start,
+                                               fallback: start ? Shortcuts.startName : Shortcuts.endName)
         var input: [String: Any] = ["event": event, "title": run.title,
                                     "category": category(for: run.categoryId)?.name ?? "",
                                     "plannedMinutes": run.plannedSeconds / 60]

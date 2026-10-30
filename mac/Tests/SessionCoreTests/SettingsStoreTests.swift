@@ -182,6 +182,22 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(s.blocklist(for: nil), BlockList(apps: ["g.app"], domains: ["g.com"]))
     }
 
+    func testProfileShortcutsFallBackToGlobalNames() {
+        var s = AppSettings(focusSeconds: 1500, idleThresholdSeconds: 120, blockApps: [], blockDomains: [])
+        s.profiles["coding"] = CategoryProfile(focusSeconds: 3000, breakSeconds: 600, startShortcut: " Code Music ", endShortcut: "  ")
+        s = s.normalized()
+        XCTAssertEqual(s.profiles["coding"]?.startShortcut, "Code Music")
+        XCTAssertNil(s.profiles["coding"]?.endShortcut)
+        XCTAssertEqual(s.shortcut(for: "coding", start: true, fallback: "session_start"), "Code Music")
+        XCTAssertEqual(s.shortcut(for: "coding", start: false, fallback: "session_end"), "session_end")
+        XCTAssertEqual(s.shortcut(for: nil, start: true, fallback: "session_start"), "session_start")
+    }
+
+    func testProfileWithoutShortcutsDecodes() throws {
+        let p = try JSONDecoder().decode(CategoryProfile.self, from: Data(#"{"focusSeconds":1500,"breakSeconds":300,"inheritBlocklist":true,"blockApps":[],"blockDomains":[]}"#.utf8))
+        XCTAssertNil(p.startShortcut)
+    }
+
     @MainActor
     func testProfilesPersistAcrossStores() {
         let suite = "profiles-\(UUID().uuidString)"

@@ -30,6 +30,7 @@ private struct SettingsForm: View {
     @State private var deletingCategory: Category?
     @State private var profileApp = ""
     @State private var profileDomain = ""
+    @State private var installedShortcuts: [String] = []
     @AppStorage(Shortcuts.enabledKey) private var shortcutsEnabled = true
     @AppStorage(IdleTag.labelKey) private var idleLabel = IdleTag.defaultLabel
 
@@ -103,7 +104,7 @@ private struct SettingsForm: View {
                         .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            row("快捷指令", hint: "开始时运行 session_start，结束时运行 session_end") {
+            row("快捷指令", hint: "开始时运行 session_start，结束时运行 session_end；分类可另行指定") {
                 VStack(alignment: .leading, spacing: 6) {
                     InkToggle(isOn: $shortcutsEnabled, label: "运行快捷指令")
                     Text("在「快捷指令」App 里新建同名快捷指令即可，没有就跳过。输入是 JSON 文本：event（start / complete / abandon）、title、category、plannedMinutes、actualMinutes。")
@@ -168,7 +169,7 @@ private struct SettingsForm: View {
 
     private var profiles: some View {
         VStack(alignment: .leading, spacing: 18) {
-            note("分类由你自己维护，和 Todoist 项目无关。从 Todoist 任务开始专注时，可以在任务详情里给它的项目选一个分类，之后同项目的任务都默认用它。每个分类还可以单独设定专注 / 休息时长和黑名单。")
+            note("分类由你自己维护，和 Todoist 项目无关。从 Todoist 任务开始专注时，可以在任务详情里给它的项目选一个分类，之后同项目的任务都默认用它。每个分类还可以单独设定专注 / 休息时长、黑名单和快捷指令。")
             newCategoryRow
             if model.categories.isEmpty {
                 Text("还没有分类。在上面输入名称新建一个。").font(.ink(12.5)).foregroundStyle(Ink.faint)
@@ -278,6 +279,7 @@ private struct SettingsForm: View {
         var parts = ["专注 \(p.focusSeconds / 60)m", "休息 \(p.breakSeconds / 60)m"]
         let extra = p.blockApps.count + p.blockDomains.count
         parts.append(p.inheritBlocklist ? (extra > 0 ? "全局 + \(extra)" : "全局黑名单") : "专属黑名单 \(extra)")
+        if p.startShortcut != nil || p.endShortcut != nil { parts.append("专属指令") }
         return parts.joined(separator: " · ")
     }
 
@@ -293,6 +295,12 @@ private struct SettingsForm: View {
                 row("专注时长") { DurationPicker(minutes: profileBinding(id, \.focusSeconds, scale: 60), range: 1...120) }
                 row("休息时长", hint: "这个分类专注结束后的休息，长短休都用它") {
                     StepperField(value: profileBinding(id, \.breakSeconds, scale: 60), range: 1...60, step: 5, unit: "分钟")
+                }
+                row("快捷指令", hint: "不指定时运行全局的同名指令") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        shortcutPicker(id, label: "开始时", key: \.startShortcut, fallback: Shortcuts.startName)
+                        shortcutPicker(id, label: "结束时", key: \.endShortcut, fallback: Shortcuts.endName)
+                    }
                 }
                 row("黑名单", hint: "全局名单 \(store.values.blockApps.count + store.values.blockDomains.count) 条") {
                     InkToggle(isOn: Binding(get: { store.values.profiles[id]?.inheritBlocklist ?? true },
@@ -321,6 +329,30 @@ private struct SettingsForm: View {
                 }
                 .padding(.top, 14)
             }
+        }
+    }
+
+    /// 从已安装的快捷指令里选；已选但已被删掉的指令仍显示在列表里，方便改回。
+    private func shortcutPicker(_ id: String, label: String, key: WritableKeyPath<CategoryProfile, String?>,
+                                fallback: String) -> some View {
+        let current = store.values.profiles[id]?[keyPath: key]
+        let names = installedShortcuts + (current.map { installedShortcuts.contains($0) ? [] : [$0] } ?? [])
+        return HStack(spacing: 10) {
+            Text(label).font(.ink(12)).foregroundStyle(Ink.sub).frame(width: 44, alignment: .leading)
+            Menu(current ?? "默认（\(fallback)）") {
+                Button("默认（\(fallback)）") { store.update { $0.profiles[id]?[keyPath: key] = nil } }
+                if !names.isEmpty { Divider() }
+                ForEach(names, id: \.self) { name in
+                    Button(name) { store.update { $0.profiles[id]?[keyPath: key] = name } }
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .font(.ink(12.5, weight: current == nil ? .regular : .semibold))
+        }
+        .task {
+            guard installedShortcuts.isEmpty else { return }
+            let names = await Task.detached { Shortcuts.installed().sorted() }.value
+            installedShortcuts = names
         }
     }
 

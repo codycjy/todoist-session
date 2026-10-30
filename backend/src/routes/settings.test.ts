@@ -108,6 +108,15 @@ it('stores category profiles and normalises their block lists', async () => {
   expect((await (await get(app)).json()).profiles.c1.focusSeconds).toBe(3000)
 })
 
+it('keeps profile shortcuts and drops blank ones', async () => {
+  const { app } = makeTestApp()
+  const base = { focusSeconds: 1500, breakSeconds: 300, inheritBlocklist: true, blockApps: [], blockDomains: [] }
+  await put(app, { profiles: { c1: { ...base, startShortcut: ' Code Music ', endShortcut: '' } } })
+  const c1 = (await (await get(app)).json()).profiles.c1
+  expect(c1.startShortcut).toBe('Code Music')
+  expect(c1).not.toHaveProperty('endShortcut')
+})
+
 it('rejects an invalid profile', async () => {
   const { app } = makeTestApp()
   const bad = { focusSeconds: 10, breakSeconds: 600, inheritBlocklist: true, blockApps: [], blockDomains: [] }

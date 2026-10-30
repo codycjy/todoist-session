@@ -12,13 +12,18 @@ const focusSeconds = z.number().int().min(60).max(7200)
 const blockApps = z.array(listItem).max(200).transform(dedupe)
 const blockDomains = z.array(listItem.transform((d) => d.toLowerCase())).max(200).transform(dedupe)
 
-/** 分类 profile：该分类专注时用的时长、休息时长和黑名单（可选继承全局名单再追加） */
+/** 快捷指令名；空串视为未设置 */
+const shortcutName = z.string().trim().max(200).optional().transform((s) => s || undefined)
+
+/** 分类 profile：该分类专注时用的时长、休息时长、黑名单（可选继承全局名单再追加）和开始 / 结束快捷指令 */
 const profile = z.object({
   focusSeconds,
   breakSeconds: z.number().int().min(60).max(3600),
   inheritBlocklist: z.boolean(),
   blockApps,
   blockDomains,
+  startShortcut: shortcutName,
+  endShortcut: shortcutName,
 })
 
 const fields = {

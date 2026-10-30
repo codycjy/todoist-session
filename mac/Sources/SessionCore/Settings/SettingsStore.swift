@@ -1,6 +1,6 @@
 import Foundation
 
-/// 分类专属的计时与黑名单。黑名单可继承全局名单再追加自己的条目。
+/// 分类专属的计时、黑名单与快捷指令。黑名单可继承全局名单再追加自己的条目。
 public struct CategoryProfile: Codable, Equatable, Sendable {
     public static let breakRange = 60...3600
 
@@ -9,19 +9,30 @@ public struct CategoryProfile: Codable, Equatable, Sendable {
     public var inheritBlocklist: Bool
     public var blockApps: [String]
     public var blockDomains: [String]
+    /// 开始 / 结束时运行的快捷指令名；nil 时用全局的 session_start / session_end。
+    public var startShortcut: String?
+    public var endShortcut: String?
 
     public init(focusSeconds: Int, breakSeconds: Int, inheritBlocklist: Bool = true,
-                blockApps: [String] = [], blockDomains: [String] = []) {
+                blockApps: [String] = [], blockDomains: [String] = [],
+                startShortcut: String? = nil, endShortcut: String? = nil) {
         self.focusSeconds = focusSeconds; self.breakSeconds = breakSeconds; self.inheritBlocklist = inheritBlocklist
         self.blockApps = blockApps; self.blockDomains = blockDomains
+        self.startShortcut = startShortcut; self.endShortcut = endShortcut
     }
 
     func normalized() -> CategoryProfile {
         CategoryProfile(focusSeconds: clamp(focusSeconds, AppSettings.focusRange),
                         breakSeconds: clamp(breakSeconds, Self.breakRange),
                         inheritBlocklist: inheritBlocklist,
-                        blockApps: dedupe(blockApps, lowercase: false), blockDomains: dedupe(blockDomains, lowercase: true))
+                        blockApps: dedupe(blockApps, lowercase: false), blockDomains: dedupe(blockDomains, lowercase: true),
+                        startShortcut: nonEmpty(startShortcut), endShortcut: nonEmpty(endShortcut))
     }
+}
+
+private func nonEmpty(_ s: String?) -> String? {
+    guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+    return t
 }
 
 private func clamp(_ v: Int, _ r: ClosedRange<Int>) -> Int { min(max(v, r.lowerBound), r.upperBound) }
@@ -76,6 +87,12 @@ public struct AppSettings: Equatable, Sendable {
     /// 该分类专注结束后的休息时长：有 profile 时长短休都用 profile 的休息时长。
     public func breakSeconds(for categoryId: String?, kind: BreakKind) -> Int {
         profile(for: categoryId)?.breakSeconds ?? (kind == .long ? Self.longBreakSeconds : Self.shortBreakSeconds)
+    }
+
+    /// 该分类开始 / 结束时运行的快捷指令：profile 指定了就用它，否则用全局默认名。
+    public func shortcut(for categoryId: String?, start: Bool, fallback: String) -> String {
+        let p = profile(for: categoryId)
+        return (start ? p?.startShortcut : p?.endShortcut) ?? fallback
     }
 
     /// 该分类专注时生效的黑名单：继承时 = 全局 ∪ 专属，否则只有专属。
