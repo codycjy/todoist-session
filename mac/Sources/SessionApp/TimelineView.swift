@@ -1,15 +1,17 @@
 import SwiftUI
 import SessionCore
 
-/// 时间轴上的预览块：进行中的专注，或「现在开始的话」下一次专注会占到哪里。
+/// 时间轴上的预览块：进行中的专注，「现在开始的话」下一次专注会占到哪里，或正在补录的那一段。
 enum TimelineGhost: Equatable {
     case running(FocusRun)
     case next(title: String, seconds: Int)
+    case backfill(title: String, DateInterval)
 
     func interval(now: Date) -> DateInterval {
         switch self {
         case .running(let run): DateInterval(start: run.startedAt, end: max(run.endAt, now))
         case .next(_, let seconds): DateInterval(start: now, duration: TimeInterval(seconds))
+        case .backfill(_, let interval): interval
         }
     }
 
@@ -18,6 +20,7 @@ enum TimelineGhost: Equatable {
         switch self {
         case .running(let run): run.endAt
         case .next(_, let seconds): now.addingTimeInterval(TimeInterval(seconds))
+        case .backfill(_, let interval): interval.end
         }
     }
 }
@@ -211,6 +214,10 @@ struct FocusTimelineView: View {
         case .next(let t, let seconds):
             title = t
             caption = "现在开始 · \(Ink.hm(interval.start))–\(Ink.hm(interval.end)) · \(seconds / 60) 分钟"
+            elapsed = 0
+        case .backfill(let t, _):
+            title = t
+            caption = "补录 · \(Ink.hm(interval.start))–\(Ink.hm(interval.end)) · \(Int(interval.duration) / 60) 分钟"
             elapsed = 0
         }
         return VStack(alignment: .leading, spacing: 1) {

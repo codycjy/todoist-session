@@ -7,6 +7,8 @@ enum DemoData {
     static var enabled: Bool { ProcessInfo.processInfo.environment["SESSION_DEMO"] == "1" }
     static var startsFocus: Bool { ProcessInfo.processInfo.environment["SESSION_DEMO_FOCUS"] == "1" }
     /// 截图路径：渲染主窗口到 PNG 后退出（自己渲染自己的窗口，不需要屏幕录制权限）。
+    /// `SESSION_DEMO_BACKFILL=1`：今日页打开补录面板（截图用）。
+    static var opensBackfill: Bool { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_BACKFILL"] == "1" }
     static var snapshotPath: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_SNAPSHOT"] }
     static var selectedTaskId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SELECT"] : nil }
     static var selectedSessionId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SESSION"] : nil }
@@ -120,6 +122,21 @@ enum DemoData {
             }
         }
         return out
+    }
+
+    /// 最近 40 分钟的专注外活动：补录面板的预览用。
+    static func ambient(now: Date) -> [ActivitySpan] {
+        let plan: [(String?, String?, String?, Double)] = [
+            ("Xcode", "TimelineView.swift", nil, 14), ("Google Chrome", "Stack Overflow", "stackoverflow.com", 6),
+            ("Xcode", "TimelineView.swift", nil, 9), (nil, nil, nil, 5), ("Slack", "#ios", nil, 3), ("Xcode", "AppModel.swift", nil, 3),
+        ]
+        var t = now.addingTimeInterval(-40 * 60)
+        return plan.map { app, title, host, minutes in
+            let end = t.addingTimeInterval(minutes * 60)
+            defer { t = end }
+            return ActivitySpan(sessionId: "", kind: app == nil ? .idle : .active, appBundleId: nil, appName: app,
+                                windowTitle: title, urlHost: host, startedAt: t, endedAt: end, wasBlocked: false)
+        }
     }
 
     /// 每个演示专注的活动片段：按固定比例切成几个 App，s2 带一次被拦截的网站。

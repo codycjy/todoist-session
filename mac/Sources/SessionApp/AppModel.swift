@@ -50,6 +50,9 @@ final class AppModel: ObservableObject {
     private var lastCompletedRun: FocusRun?
     /// 当前这次休息的「还在用电脑」检测；不在休息时为 nil。
     private var breakNudge: BreakNudge?
+    /// 专注之外的活动记录（补录用），只存本机。
+    private var ambient: AmbientRecorder?
+    private var ambientTimer: Timer?
 
     /// 某分类的默认专注时长：环境变量覆盖（开发用）> 分类 profile > 全局设置。进行中的 session 不受影响。
     func focusSeconds(for categoryId: String?) -> Int {
@@ -110,6 +113,18 @@ final class AppModel: ObservableObject {
         }
 
         Notifier.setUp { [weak self] action, info in self?.handleNotification(action, info: info) }
+
+        if !demo, let store {
+            ambient = AmbientRecorder(sampler: MacActivitySampler(), store: store, clock: SystemClock(),
+                                      idleThreshold: TimeInterval(settings.effective.idleThresholdSeconds),
+                                      maxGap: Self.ambientInterval * 2.5)
+            ambient?.prune()
+            let t = Timer(timeInterval: Self.ambientInterval, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.sampleAmbient() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            ambientTimer = t
+        }
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -182,6 +197,7 @@ final class AppModel: ObservableObject {
         ticker?.invalidate()
         syncTimer?.invalidate()
         sampleTimer?.invalidate()
+        ambientTimer?.invalidate()
         if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
     }
 
@@ -208,6 +224,25 @@ final class AppModel: ObservableObject {
     var autoFinish: Bool {
         get { engine.autoFinish }
         set { engine.autoFinish = newValue; defaults.set(newValue, forKey: Self.autoFinishKey); objectWillChange.send() }
+    }
+
+    static let ambientKey = "ambient.enabled"
+    /// 专注外每隔多久采样一次；比专注时（2 秒）稀疏，省电。
+    static let ambientInterval: TimeInterval = 10
+    /// 记录专注之外的活动（只存本机，用于补录）。默认开。
+    var ambientEnabled: Bool {
+        get { defaults.object(forKey: Self.ambientKey) as? Bool ?? true }
+        set {
+            defaults.set(newValue, forKey: Self.ambientKey)
+            if !newValue { ambient?.stop(at: Date()) }
+            objectWillChange.send()
+        }
+    }
+
+    /// 清空本机所有专注外活动记录。
+    func clearAmbient() {
+        ambient?.stop(at: Date())
+        try? store?.pruneAmbient(before: nil)
     }
 
     static let breakNudgeKey = "break.nudge"
@@ -508,6 +543,7 @@ final class AppModel: ObservableObject {
         do {
             try engine.start(spec); pendingCompletion = nil
             if case .focusing(let run) = engine.phase {
+                ambient?.stop(at: run.startedAt)   // 专注期间由 tracker 记录，不重复
                 // 此时没有运行中的 tracker（engine.start 已确认空闲），按最新设置重建。
                 guard !DemoData.enabled else { return true }
                 tracker = Self.makeTracker(store: store, settings: settings.effective, categoryId: run.categoryId)
@@ -594,6 +630,7 @@ final class AppModel: ObservableObject {
         categories = DemoData.categories; allCategories = DemoData.categories
         entries = DemoData.entries; tasks = DemoData.tasks(now: now)
         for s in DemoData.history(now: now) { try? store?.save(s) }
+        try? store?.appendAmbient(DemoData.ambient(now: now))
         for s in DemoData.sessions(now: now) {
             try? store?.save(s)
             try? store?.append(DemoData.spans(for: s))
@@ -613,6 +650,51 @@ final class AppModel: ObservableObject {
         engine.tick()
         checkBreakNudge()
         objectWillChange.send()
+    }
+
+    // MARK: 补录
+
+    private var ambientSamples = 0
+
+    private func sampleAmbient() {
+        guard let ambient else { return }
+        if case .focusing = engine.phase { return }
+        guard ambientEnabled else { return }
+        ambient.sample()
+        ambientSamples += 1
+        if ambientSamples % 360 == 0 { ambient.prune() }   // 约每小时清一次过期记录
+    }
+
+    /// 补录区间内的活动预览。
+    func backfillPreview(from: Date, to: Date) -> (top: [Backfill.Usage], idleSeconds: Int) {
+        let spans = (try? store?.ambientSpans(from: from, to: to)) ?? []
+        return Backfill.summary(Backfill.spans(spans, from: from, to: to, sessionId: ""))
+    }
+
+    /// 和已有记录（含进行中的专注）的冲突；nil 表示可以补录。
+    func backfillProblem(from: Date, to: Date) -> Backfill.Problem? {
+        var existing = (try? store?.sessions(from: from.addingTimeInterval(-86_400), to: to)) ?? []
+        if let run = currentRun {
+            existing.append(SessionRecord(id: "running", title: run.title, categoryId: nil, source: run.source,
+                                          todoistTaskId: nil, entryId: nil, plannedSeconds: run.plannedSeconds,
+                                          actualSeconds: 0, startedAt: run.startedAt, endedAt: .distantFuture))
+        }
+        return Backfill.problem(from: from, to: to, now: Date(), existing: existing)
+    }
+
+    /// 把 [from, to) 记成一次专注：带上这段的专注外活动，照常上传和 AI 评估。返回是否成功。
+    @discardableResult
+    func backfill(title: String, categoryId: String?, from: Date, to: Date, allowIdle: Bool) -> Bool {
+        guard let store, backfillProblem(from: from, to: to) == nil else { return false }
+        let record = Backfill.record(title: title, categoryId: categoryId, from: from, to: to, allowIdle: allowIdle)
+        let ambientSpans = (try? store.ambientSpans(from: from, to: to)) ?? []
+        do { try store.saveBackfill(record, spans: Backfill.spans(ambientSpans, from: from, to: to, sessionId: record.id)) }
+        catch { errorMessage = "补录失败：\(error.localizedDescription)"; return false }
+        remember(title: title, categoryId: categoryId)
+        reloadToday()
+        objectWillChange.send()
+        Task { await flushSync() }
+        return true
     }
 
     // MARK: 休息提醒

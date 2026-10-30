@@ -16,6 +16,9 @@ struct TodayView: View {
     @State private var taskSeconds: Int?
     @FocusState private var composerFocused: Bool
     @State private var composerAllowIdle = false
+    /// 正在补录的那一段；nil 时不显示补录面板。
+    @State private var backfill: BackfillDraft? = DemoData.opensBackfill
+        ? BackfillDraft(from: Date().addingTimeInterval(-30 * 60), to: Date(), title: "修时间轴的边界问题") : nil
     @AppStorage("layout.timelineWidth") private var timelineWidth = 340.0
 
     private var idle: Bool { model.engine.phase == .idle }
@@ -24,18 +27,28 @@ struct TodayView: View {
     private var effectiveSeconds: Int { seconds ?? model.focusSeconds(for: categoryId) }
     private var selectedTask: TodoistTask? { model.tasks.first { $0.id == selectedTaskId } }
     private var selectedSession: SessionRecord? { model.todaySessions.first { $0.id == selectedSessionId } }
-    private var hasPanel: Bool { selectedTask != nil || selectedSession != nil }
+    private var hasPanel: Bool { selectedTask != nil || selectedSession != nil || backfill != nil }
 
     private func dismissPanels() {
         guard hasPanel else { return }
         select(task: nil); select(session: nil)
+        withAnimation(.easeOut(duration: 0.18)) { backfill = nil }
     }
 
     private func select(task id: String?) {
-        withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = id; if id != nil { selectedSessionId = nil } }
+        withAnimation(.easeOut(duration: 0.18)) { selectedTaskId = id; if id != nil { selectedSessionId = nil; backfill = nil } }
     }
     private func select(session id: String?) {
-        withAnimation(.easeOut(duration: 0.18)) { selectedSessionId = id; if id != nil { selectedTaskId = nil } }
+        withAnimation(.easeOut(duration: 0.18)) { selectedSessionId = id; if id != nil { selectedTaskId = nil; backfill = nil } }
+    }
+
+    /// 打开补录面板：默认从今天最后一次专注结束（最多一小时前）到现在。
+    private func startBackfill() {
+        let r = Backfill.suggestedRange(after: model.todaySessions, now: Date(), calendar: .current)
+        withAnimation(.easeOut(duration: 0.18)) {
+            selectedTaskId = nil; selectedSessionId = nil
+            backfill = BackfillDraft(from: r.from, to: r.to)
+        }
     }
 
     var body: some View {
@@ -99,6 +112,12 @@ struct TodayView: View {
                                 onClose: { select(task: nil) },
                                 onChoose: { taskSeconds = $0 },
                                 onPickCategory: { model.setCategory($0, forProject: task.projectId) })
+                    .padding(.horizontal, 32).padding(.bottom, 20)
+                    .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
+            } else if backfill != nil {
+                BackfillPanel(draft: Binding(get: { backfill ?? BackfillDraft(from: Date(), to: Date()) },
+                                             set: { backfill = $0 }),
+                              onClose: { withAnimation(.easeOut(duration: 0.18)) { backfill = nil } })
                     .padding(.horizontal, 32).padding(.bottom, 20)
                     .frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             } else if let session = selectedSession {
@@ -279,6 +298,11 @@ struct TodayView: View {
         VStack(spacing: 0) {
             HStack(alignment: .lastTextBaseline) {
                 Text("时间轴").font(.ink(13, weight: .semibold))
+                Button(action: startBackfill) {
+                    HStack(spacing: 3) { Image(systemName: "plus"); Text("补录") }.font(.inkMono(10))
+                }
+                .buttonStyle(.plain).foregroundStyle(Ink.sub).padding(.leading, 8)
+                .help("刚才忘了开计时？把一段时间补成专注")
                 Spacer()
                 legend(dashed: true, "计划")
                 legend(dashed: false, "实际")
@@ -297,6 +321,9 @@ struct TodayView: View {
 
     /// 专注中：进行中的这一段；空闲：现在开始的话会占到哪（选中任务时按任务详情里的时长）。
     private var ghost: TimelineGhost? {
+        if let backfill {
+            return .backfill(title: backfill.title.isEmpty ? "补录" : backfill.title, backfill.interval)
+        }
         switch model.engine.phase {
         case .focusing(let run): return .running(run)
         case .idle:

@@ -96,6 +96,16 @@ private struct SettingsForm: View {
                 Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")
                     .font(.ink(12.5)).foregroundStyle(Ink.sub)
             }
+            row("专注外记录", hint: "补录用，只存在本机") {
+                VStack(alignment: .leading, spacing: 6) {
+                    InkToggle(isOn: Binding(get: { model.ambientEnabled }, set: { model.ambientEnabled = $0 }),
+                              label: "没在专注时也记录前台 App 和网站")
+                    Text("用于时间轴上的「补录」：忘了开计时，事后选一段时间，看看那段在用什么并记成专注。记录只保存在本机，\(AmbientRecorder.retentionDays) 天后自动删除；只有补录成专注的那一段会上传。")
+                        .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                    Button("清除已有的专注外记录") { model.clearAmbient() }
+                        .buttonStyle(InkButtonStyle(compact: true))
+                }
+            }
             row("休息提醒", hint: "休息结束的通知可直接开始下一段") {
                 VStack(alignment: .leading, spacing: 6) {
                     InkToggle(isOn: Binding(get: { model.breakNudgeEnabled }, set: { model.breakNudgeEnabled = $0 }),

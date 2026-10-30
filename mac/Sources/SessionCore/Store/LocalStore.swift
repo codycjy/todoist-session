@@ -37,6 +37,16 @@ public final class LocalStore: @unchecked Sendable {
         migrator.registerMigration("v3-allow-idle") { db in
             try db.execute(sql: "ALTER TABLE sessions ADD COLUMN allow_idle INTEGER NOT NULL DEFAULT 0")
         }
+        // 专注之外的活动：只存本机、定期清理，补录时才复制成某个 session 的 span 上传。
+        migrator.registerMigration("v4-ambient") { db in
+            try db.execute(sql: """
+                CREATE TABLE ambient_spans (
+                  id TEXT PRIMARY KEY, kind TEXT NOT NULL,
+                  app_bundle_id TEXT, app_name TEXT, window_title TEXT, url_host TEXT, url_path TEXT,
+                  started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL);
+                CREATE INDEX ambient_started ON ambient_spans(started_at);
+                """)
+        }
         try migrator.migrate(db)
     }
 
@@ -66,6 +76,53 @@ public final class LocalStore: @unchecked Sendable {
                       url_host, url_path, started_at, ended_at, was_blocked)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
                     """, arguments: [s.id, s.sessionId, s.kind.rawValue, s.appBundleId, s.appName, s.windowTitle,
+                                     s.urlHost, s.urlPath, Self.ms(s.startedAt), Self.ms(s.endedAt), s.wasBlocked])
+            }
+        }
+    }
+
+    /// 专注之外的活动 span；`sessionId` 不落盘。
+    public func appendAmbient(_ spans: [ActivitySpan]) throws {
+        guard !spans.isEmpty else { return }
+        try db.write { db in
+            for s in spans {
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO ambient_spans(id, kind, app_bundle_id, app_name, window_title, url_host,
+                      url_path, started_at, ended_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    """, arguments: [s.id, s.kind.rawValue, s.appBundleId, s.appName, s.windowTitle, s.urlHost,
+                                     s.urlPath, Self.ms(s.startedAt), Self.ms(s.endedAt)])
+            }
+        }
+    }
+
+    /// 删除早于 `cutoff` 结束的专注外活动；`cutoff` 为 nil 时全部删除。
+    public func pruneAmbient(before cutoff: Date?) throws {
+        try db.write { db in
+            if let cutoff {
+                try db.execute(sql: "DELETE FROM ambient_spans WHERE ended_at < ?", arguments: [Self.ms(cutoff)])
+            } else {
+                try db.execute(sql: "DELETE FROM ambient_spans")
+            }
+        }
+    }
+
+    /// 补录：一次写入 session 和它的 span（同一事务）。
+    public func saveBackfill(_ r: SessionRecord, spans: [ActivitySpan]) throws {
+        try db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sessions(id, title, category_id, source, todoist_task_id, entry_id,
+                  planned_seconds, actual_seconds, started_at, ended_at, allow_idle, sync_state)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """, arguments: [r.id, r.title, r.categoryId, r.source.rawValue, r.todoistTaskId, r.entryId,
+                                 r.plannedSeconds, r.actualSeconds, Self.ms(r.startedAt), Self.ms(r.endedAt),
+                                 r.allowIdle, r.syncState.rawValue])
+            for s in spans {
+                try db.execute(sql: """
+                    INSERT INTO spans(id, session_id, kind, app_bundle_id, app_name, window_title,
+                      url_host, url_path, started_at, ended_at, was_blocked)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    """, arguments: [s.id, r.id, s.kind.rawValue, s.appBundleId, s.appName, s.windowTitle,
                                      s.urlHost, s.urlPath, Self.ms(s.startedAt), Self.ms(s.endedAt), s.wasBlocked])
             }
         }
@@ -138,6 +195,19 @@ public final class LocalStore: @unchecked Sendable {
         try db.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM sessions WHERE started_at >= ? AND started_at < ? ORDER BY started_at",
                              arguments: [Self.ms(from), Self.ms(to)]).map(Self.record)
+        }
+    }
+
+    /// 与 [from, to) 有重叠的专注外活动（未裁剪），`sessionId` 为空串。
+    public func ambientSpans(from: Date, to: Date) throws -> [ActivitySpan] {
+        try db.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM ambient_spans WHERE started_at < ? AND ended_at > ? ORDER BY started_at, rowid",
+                             arguments: [Self.ms(to), Self.ms(from)]).map { r in
+                ActivitySpan(id: r["id"], sessionId: "", kind: SpanKind(rawValue: r["kind"]) ?? .active,
+                             appBundleId: r["app_bundle_id"], appName: r["app_name"], windowTitle: r["window_title"],
+                             urlHost: r["url_host"], urlPath: r["url_path"],
+                             startedAt: Self.date(r["started_at"]), endedAt: Self.date(r["ended_at"]), wasBlocked: false)
+            }
         }
     }
 
