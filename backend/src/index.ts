@@ -6,7 +6,7 @@ import { assertSecret } from './config.js'
 import { createDb } from './db/client.js'
 import { createOpenRouterEvaluator } from './eval/openrouter.js'
 import { createEvalWorker } from './eval/worker.js'
-import { createTodoistGateway } from './todoist/sdk.js'
+import { createTodoistGateway } from './todoist/http.js'
 
 const secret = assertSecret(process.env.APP_SECRET)
 

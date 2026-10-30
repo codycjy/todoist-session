@@ -11,10 +11,14 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:migrate": "wrangler d1 migrations apply now --remote",
+    "d1:seed": "tsx src/scripts/d1-seed.ts",
+    "d1:export": "tsx src/scripts/d1-export.ts"
   },
   "dependencies": {
-    "@doist/todoist-sdk": "^11.0.0",
     "@hono/node-server": "^2.1.5",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
@@ -27,6 +31,7 @@
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "wrangler": "4.151.0"
   }
 }

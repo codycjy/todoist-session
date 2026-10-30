@@ -25,9 +25,9 @@ export function createDb(path: string) {
 type Step = () => unknown
 
 /**
- * 原子地执行一组写入。每一步返回一条尚未执行的查询（insert/update/delete 构造器或 `db.run(sql)`）：
+ * 原子地执行一组写入。每一步返回一条尚未执行的查询（insert/update/delete 构造器）：
  * D1 上整组作为一个 batch 提交；better-sqlite3 上在同一个同步事务里依次执行。
- * 用函数包一层，是因为同步驱动的 `db.run(sql)` 一调用就执行，必须轮到它时才构造。
+ * 用函数包一层，保证同步驱动上每一步轮到它时才构造（前一步的写入已生效）。
  */
 export async function atomic(db: Db, steps: Step[]): Promise<void> {
   if (steps.length === 0) return

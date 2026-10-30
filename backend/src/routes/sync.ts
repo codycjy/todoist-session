@@ -52,14 +52,13 @@ export interface SyncOptions {
  */
 function insertSpans(db: Db, s: z.infer<typeof sessionSchema>) {
   const rows = JSON.stringify(s.spans)
-  return db.run(sql`
-    INSERT OR IGNORE INTO activity_spans
-      (id, session_id, kind, app_bundle_id, app_name, window_title, url_host, url_path, started_at, ended_at, was_blocked)
+  // 列顺序须与 activitySpans 的定义一致。用 insert().select() 而不是 db.run(sql)：drizzle 的 D1 batch 不支持带参数的 raw 查询。
+  return db.insert(activitySpans).select(sql`
     SELECT json_extract(value, '$.id'), ${s.id}, json_extract(value, '$.kind'), json_extract(value, '$.appBundleId'),
       json_extract(value, '$.appName'), json_extract(value, '$.windowTitle'), json_extract(value, '$.urlHost'),
       json_extract(value, '$.urlPath'), json_extract(value, '$.startedAt'), json_extract(value, '$.endedAt'),
       json_extract(value, '$.wasBlocked')
-    FROM json_each(${rows})`)
+    FROM json_each(${rows}) WHERE true`).onConflictDoNothing() // WHERE 是 SQLite 语法要求：否则 ON CONFLICT 有歧义
 }
 
 export function syncRoutes(db: Db, opts: SyncOptions) {

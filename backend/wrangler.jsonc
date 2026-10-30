@@ -1,0 +1,21 @@
+// Cloudflare Workers 部署配置（Node / Docker 部署不用它）。步骤见 docs/deploy-cloudflare.md。
+{
+  "name": "now-backend",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // crypto.ts 用 node:crypto 的 AES-GCM；Todoist SDK 也依赖部分 Node API
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "now",
+      // `npx wrangler d1 create now` 输出的 id 填在这里
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      // 和 Node 版共用 drizzle 生成的迁移
+      "migrations_dir": "drizzle"
+    }
+  ],
+  // 评估兜底：每分钟处理一次 pending
+  "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": true }
+}
