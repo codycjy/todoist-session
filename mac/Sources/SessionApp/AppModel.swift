@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     @Published var entries: [Entry] = []
     @Published var pendingCompletion: CompletedFocus?
     @Published var todaySessions: [SessionRecord] = []
+    /// 近 30 天本机记录算出的预估准确度：开始面板的时长建议、统计页的「预估」面板用。
+    @Published private(set) var estimates = Estimates.empty
     @Published var unsynced = 0
     @Published var accessibilityMissing = false
     @Published var errorMessage: String?
@@ -565,12 +567,15 @@ final class AppModel: ObservableObject {
         let start = Calendar.current.startOfDay(for: Date())
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         todaySessions = (try? store?.sessions(from: start, to: end)) ?? []
+        let since = Calendar.current.date(byAdding: .day, value: -Estimates.windowDays, to: start) ?? start
+        estimates = Estimates(sessions: (try? store?.sessions(from: since, to: end)) ?? [])
     }
 
     private func loadDemo() {
         let now = Date()
         categories = DemoData.categories; allCategories = DemoData.categories
         entries = DemoData.entries; tasks = DemoData.tasks(now: now)
+        for s in DemoData.history(now: now) { try? store?.save(s) }
         for s in DemoData.sessions(now: now) {
             try? store?.save(s)
             try? store?.append(DemoData.spans(for: s))

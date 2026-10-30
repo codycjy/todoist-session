@@ -109,6 +109,7 @@ struct StatsView: View {
                     panel("App / 网站") { appRanking(s) }
                     if !isDay { panel("专注度趋势") { trendChart(s) } }
                     panel("活跃 / 闲置") { activeIdle(s) }
+                    panel("预估 · 近 \(Estimates.windowDays) 天") { estimatePanel }
                 }
             }
         }
@@ -433,6 +434,37 @@ struct StatsView: View {
             Text(name).font(.ink(12))
             Text(value).font(.inkMono(12, weight: .medium))
             Text("\(pct)%").font(.inkMono(11)).foregroundStyle(Ink.sub)
+        }
+    }
+
+    // MARK: 预估
+
+    /// 近 30 天每个分类计划与实际的中位数（本机记录，不随翻页变化）。
+    private var estimatePanel: some View {
+        let rows = model.estimates.byCategory
+            .map { (id: $0.key, e: $0.value) }
+            .sorted { $0.e.sampleCount > $1.e.sampleCount }
+        return VStack(alignment: .leading, spacing: 10) {
+            if rows.isEmpty { empty("每个分类专注满 \(Estimates.minCategorySamples) 次后显示") }
+            ForEach(rows, id: \.id) { r in
+                let c = model.allCategories.first { $0.id == r.id }
+                let d = r.e.deviationPercent
+                HStack(spacing: 6) {
+                    CategoryMark(color: c.map { Color(todoistColor: $0.color) } ?? Ink.faint, size: 8)
+                    Text(c?.name ?? "无分类").font(.ink(12.5, weight: .medium)).lineLimit(1)
+                    Text("\(r.e.sampleCount) 次").font(.inkMono(10)).foregroundStyle(Ink.faint)
+                    Spacer()
+                    Text("\(Ink.minutes(r.e.medianPlannedSeconds)) → \(Ink.minutes(r.e.medianActualSeconds))").font(.inkMono(11))
+                    Text(abs(d) < 5 ? "≈" : d > 0 ? "+\(d)%" : "−\(-d)%")
+                        .font(.inkMono(11, weight: .semibold))
+                        .foregroundStyle(d >= 15 ? Ink.now : Ink.sub)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+            if !rows.isEmpty {
+                Text("计划 → 实际，均为中位数；超出 15% 以上标红。开始专注时会按它建议时长。")
+                    .font(.ink(11)).foregroundStyle(Ink.faint).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

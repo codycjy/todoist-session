@@ -10,6 +10,9 @@ struct TaskDetailPanel: View {
     let canStart: Bool
     /// 分类 profile / 全局默认时长（秒）。
     let defaultSeconds: Int
+    /// 这个任务（记录够多时）或其分类的历史预估；nil 时不显示建议。
+    var estimate: Estimate? = nil
+    var estimateScope = ""
     /// 参数是选定的专注秒数和是否可闲置。
     let onStart: (Int, Bool) -> Void
     let onClose: () -> Void
@@ -27,7 +30,7 @@ struct TaskDetailPanel: View {
     private var taskSeconds: Int? { task.durationMinutes.flatMap { $0 > 0 ? $0 * 60 : nil } }
     /// 可选时长（秒）：常用档位 + 默认值 + 任务自己的时长。
     private var options: [Int] {
-        Array(Set(FocusPresets.seconds + [defaultSeconds] + (taskSeconds.map { [$0] } ?? []))).sorted()
+        Array(Set(FocusPresets.seconds + [defaultSeconds] + [taskSeconds, seconds].compactMap { $0 })).sorted()
     }
     private var chosen: Int { seconds ?? taskSeconds ?? defaultSeconds }
 
@@ -104,6 +107,9 @@ struct TaskDetailPanel: View {
                     HStack(spacing: 6) { Image(systemName: "play.fill").font(.ink(10)); Text("开始专注") }
                 }
                 .buttonStyle(.inkPrimary).fixedSize().disabled(!canStart)
+            }
+            if let estimate {
+                EstimateHint(estimate: estimate, scope: estimateScope, chosen: chosen) { seconds = $0 }
             }
         }
         .inkPanel(padding: 18)

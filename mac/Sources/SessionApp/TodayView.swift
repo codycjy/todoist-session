@@ -92,6 +92,9 @@ struct TodayView: View {
             if let task = selectedTask {
                 TaskDetailPanel(task: task, category: category(of: task), categories: model.categories, canStart: idle,
                                 defaultSeconds: model.focusSeconds(for: model.categoryId(for: task)),
+                                estimate: model.estimates.estimate(categoryId: model.categoryId(for: task), todoistTaskId: task.id),
+                                estimateScope: model.estimates.byTask[task.id] != nil ? "这个任务"
+                                    : model.category(for: model.categoryId(for: task))?.name ?? "无分类",
                                 onStart: { secs, idleOK in model.startTask(task, seconds: secs, allowIdle: idleOK); selectedTaskId = nil },
                                 onClose: { select(task: nil) },
                                 onChoose: { taskSeconds = $0 },
@@ -157,6 +160,10 @@ struct TodayView: View {
                 .disabled(trimmedTitle.isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
+            if let e = model.estimates.estimate(categoryId: categoryId) {
+                EstimateHint(estimate: e, scope: model.category(for: categoryId)?.name ?? "无分类",
+                             chosen: effectiveSeconds) { seconds = $0 }
+            }
             if !model.entries.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -175,7 +182,7 @@ struct TodayView: View {
 
     /// 可选时长（秒）：常用档位 + 当前默认值。
     private var durationOptions: [Int] {
-        Array(Set(FocusPresets.seconds + [model.focusSeconds(for: categoryId)])).sorted()
+        Array(Set(FocusPresets.seconds + [model.focusSeconds(for: categoryId)] + (seconds.map { [$0] } ?? []))).sorted()
     }
 
     private func start() {

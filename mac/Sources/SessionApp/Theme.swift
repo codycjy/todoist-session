@@ -193,6 +193,34 @@ struct InkChip: View {
     }
 }
 
+/// 开始面板 / 任务详情里的一行预估：「工作 · 近 30 天 18 次，实际中位 38m，常比计划多 52%」，附「用 40m」。
+struct EstimateHint: View {
+    let estimate: Estimate
+    let scope: String
+    let chosen: Int
+    let apply: (Int) -> Void
+
+    private var drift: String {
+        let d = estimate.deviationPercent
+        return d >= 5 ? "常比计划多 \(d)%" : d <= -5 ? "常比计划少 \(-d)%" : "和计划基本一致"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "ruler").font(.ink(10)).foregroundStyle(Ink.faint)
+            Text("\(scope) · 近 \(Estimates.windowDays) 天 \(estimate.sampleCount) 次，实际中位 \(Ink.minutes(estimate.medianActualSeconds))，\(drift)")
+                .font(.ink(11.5)).foregroundStyle(Ink.sub).lineLimit(1).truncationMode(.middle)
+            if estimate.suggestedSeconds != chosen {
+                Button { apply(estimate.suggestedSeconds) } label: {
+                    Text("用 \(Ink.chip(estimate.suggestedSeconds))").font(.inkMono(11, weight: .semibold)).underline()
+                }
+                .buttonStyle(.plain).foregroundStyle(Ink.ink).fixedSize()
+                .help("按历史实际时长设定这次的计划")
+            }
+        }
+    }
+}
+
 /// 项目色小方块，用来在荧光黄块之外区分分类。
 struct CategoryMark: View {
     let color: Color

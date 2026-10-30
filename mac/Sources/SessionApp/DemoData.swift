@@ -99,6 +99,27 @@ enum DemoData {
         ]
     }
 
+    /// 过去 28 天的演示记录（无活动片段）：工作常超时、学习常提前结束，供预估与对比面板展示。
+    static func history(now: Date) -> [SessionRecord] {
+        let today = Calendar.current.startOfDay(for: now)
+        var out: [SessionRecord] = []
+        for day in 1...28 {
+            let base = today.addingTimeInterval(TimeInterval(-day * 86_400))
+            let plan: [(String, String, Int, Int, Int)] = [   // 标题、分类、开始小时、计划分钟、实际分钟
+                ("写周报", "c-work", 9, 25, 30 + (day * 7) % 15),
+                ("读论文", "c-study", 14, 50, 38 + (day * 5) % 14),
+                ("整理房间", "c-life", 20, 25, 20 + (day * 3) % 10),
+            ]
+            for (i, p) in plan.enumerated() where (day + i) % 4 != 0 {
+                let start = base.addingTimeInterval(TimeInterval(p.2 * 3600))
+                out.append(SessionRecord(id: "h\(day)-\(i)", title: p.0, categoryId: p.1, source: .custom, todoistTaskId: nil,
+                                         entryId: nil, plannedSeconds: p.3 * 60, actualSeconds: p.4 * 60, startedAt: start,
+                                         endedAt: start.addingTimeInterval(TimeInterval(p.4 * 60)), syncState: .synced))
+            }
+        }
+        return out
+    }
+
     /// 每个演示专注的活动片段：按固定比例切成几个 App，s2 带一次被拦截的网站。
     static func spans(for s: SessionRecord) -> [ActivitySpan] {
         let plan: [(String?, String?, String?, Double, Bool)] = switch s.id {
