@@ -326,32 +326,6 @@ struct TodayView: View {
 }
 
 /// 任务按「已排期（今天带时间）/ 今天（只有日期）/ 过期」分组。
-private struct TaskGroups {
-    var scheduled: [TodoistTask] = []
-    var today: [TodoistTask] = []
-    var overdue: [TodoistTask] = []
-    var isEmpty: Bool { scheduled.isEmpty && today.isEmpty && overdue.isEmpty }
-
-    init(tasks: [TodoistTask], now: Date = Date(), calendar: Calendar = .current) {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
-        let todayString = f.string(from: now)
-        let startOfToday = calendar.startOfDay(for: now)
-        for t in tasks {
-            if let time = t.dueTime {
-                if time < startOfToday { overdue.append(t) }
-                else if calendar.isDateInToday(time) { scheduled.append(t) }
-                else { today.append(t) }
-            } else if let d = t.dueDate, String(d.prefix(10)) < todayString {
-                overdue.append(t)
-            } else {
-                today.append(t)
-            }
-        }
-        scheduled.sort { ($0.dueTime ?? .distantPast) < ($1.dueTime ?? .distantPast) }
-        today.sort { $0.priority > $1.priority }
-    }
-}
-
 // MARK: 计时卡片
 
 private struct FocusCard: View {

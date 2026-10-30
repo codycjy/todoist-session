@@ -305,6 +305,17 @@ final class TimerEngineTests: XCTestCase {
         XCTAssertEqual(engine.phase, .idle)
     }
 
+    func testAutoModeBreakEndFiresTimeUpOnce() throws {
+        let engine = TimerEngine(clock: clock, store: store, autoFinish: true)
+        var timeUps: [TimerPhase] = []
+        engine.onTimeUp = { timeUps.append($0) }
+        try engine.startBreak(.short, seconds: 300)
+        clock.advance(300); engine.tick(); engine.tick()
+        XCTAssertEqual(engine.phase, .idle)
+        XCTAssertEqual(timeUps.count, 1)
+        guard case .breaking = timeUps.first else { return XCTFail("reports the break that ended") }
+    }
+
     func testManualModeRelaunchPastEndDoesNotRecoverOrRenotify() throws {
         let first = TimerEngine(clock: clock, store: store, autoFinish: false)
         try first.start(spec(seconds: 600))

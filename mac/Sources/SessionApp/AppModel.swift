@@ -44,6 +44,10 @@ final class AppModel: ObservableObject {
 
     /// 最近一次完成的专注所属分类：休息时长按它的 profile 取。
     private var lastCompletedCategoryId: String?
+    /// 最近一次完成的专注：休息结束通知里「继续」按它再来一段。
+    private var lastCompletedRun: FocusRun?
+    /// 当前这次休息的「还在用电脑」检测；不在休息时为 nil。
+    private var breakNudge: BreakNudge?
 
     /// 某分类的默认专注时长：环境变量覆盖（开发用）> 分类 profile > 全局设置。进行中的 session 不受影响。
     func focusSeconds(for categoryId: String?) -> Int {
@@ -93,15 +97,17 @@ final class AppModel: ObservableObject {
             // 闭包类型为非隔离（SessionCore 不依赖 MainActor），编译器无法证明在主 actor，故保留显式 hop。
             Task { @MainActor in self?.complete(done, live: true) }
         }
-        engine.onTimeUp = { phase in
+        engine.onTimeUp = { [weak self] phase in
             Task { @MainActor in
                 switch phase {
                 case .focusing(let run): Notifier.post("时间到：\(run.title)", body: "点「完成」记录这次专注")
-                case .breaking: Notifier.post("休息时间到", body: "点「结束休息」回到今日")
+                case .breaking: self?.postBreakOver()
                 case .idle: break
                 }
             }
         }
+
+        Notifier.setUp { [weak self] action, info in self?.handleNotification(action, info: info) }
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -200,6 +206,13 @@ final class AppModel: ObservableObject {
     var autoFinish: Bool {
         get { engine.autoFinish }
         set { engine.autoFinish = newValue; defaults.set(newValue, forKey: Self.autoFinishKey); objectWillChange.send() }
+    }
+
+    static let breakNudgeKey = "break.nudge"
+    /// 休息期间还在用电脑时提醒一次。默认开。
+    var breakNudgeEnabled: Bool {
+        get { defaults.object(forKey: Self.breakNudgeKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Self.breakNudgeKey); objectWillChange.send() }
     }
 
     var currentTitle: String? { currentRun?.title }
@@ -518,6 +531,7 @@ final class AppModel: ObservableObject {
     private func complete(_ done: CompletedFocus, live: Bool, notify: Bool = true) {
         tracker?.stop(at: done.endedAt); stopSampling(); Browser.restoreAll()
         lastCompletedCategoryId = done.run.categoryId
+        if live { lastCompletedRun = done.run }
         if live { runShortcut(start: false, event: "complete", run: done.run, actualSeconds: done.actualSeconds) }
         do { try store?.save(SessionRecord(done)) }
         catch { errorMessage = "保存专注记录失败：\(error.localizedDescription)" }
@@ -593,6 +607,47 @@ final class AppModel: ObservableObject {
 
     private func tick() {
         engine.tick()
+        checkBreakNudge()
         objectWillChange.send()
+    }
+
+    // MARK: 休息提醒
+
+    /// 休息时间到：带「继续刚才的」和「开始下一个任务」两个按钮。
+    private func postBreakOver() {
+        let next = TaskGroups(tasks: tasks).next(excluding: lastCompletedRun?.todoistTaskId)
+        var actions: [(NotificationAction, String)] = []
+        if let run = lastCompletedRun { actions.append((.resume, "继续：\(run.title)")) }
+        if let next { actions.append((.next, "开始：\(next.content)")) }
+        let body = next.map { "下一个：\($0.content)" } ?? (autoFinish ? "回到今日开始下一段专注" : "点「结束休息」回到今日")
+        Notifier.post("休息时间到", body: body, actions: actions, userInfo: next.map { ["taskId": $0.id] } ?? [:])
+    }
+
+    /// 点通知按钮直接开始（休息超时中会先结束休息）；点通知本身打开主窗口。
+    private func handleNotification(_ action: NotificationAction?, info: [AnyHashable: Any]) {
+        guard let action else {
+            NotificationCenter.default.post(name: .openMainWindow, object: nil)
+            return
+        }
+        if case .breaking = engine.phase { endBreak() }
+        guard engine.phase == .idle else { return }
+        switch action {
+        case .resume:
+            guard let r = lastCompletedRun else { return }
+            begin(FocusSpec(title: r.title, categoryId: r.categoryId, source: r.source, todoistTaskId: r.todoistTaskId,
+                            entryId: r.entryId, plannedSeconds: r.plannedSeconds, allowIdle: r.allowIdle))
+        case .next:
+            guard let id = info["taskId"] as? String, let task = tasks.first(where: { $0.id == id }) else { return }
+            startTask(task)
+        }
+    }
+
+    private func checkBreakNudge() {
+        guard case .breaking = engine.phase, breakNudgeEnabled, !DemoData.enabled else { breakNudge = nil; return }
+        let now = Date()
+        if breakNudge == nil { breakNudge = BreakNudge(startedAt: now) }
+        if breakNudge?.sample(now: now, idleSeconds: MacActivitySampler.inputIdleSeconds()) == true {
+            Notifier.post("还在休息时间", body: "已经在电脑前忙了一分多钟，起来走走、喝口水吧")
+        }
     }
 }

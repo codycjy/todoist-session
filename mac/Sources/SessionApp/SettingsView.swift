@@ -96,6 +96,14 @@ private struct SettingsForm: View {
                 Text("短休 \(AppSettings.shortBreakSeconds / 60) 分钟 · 每 4 个番茄长休 \(AppSettings.longBreakSeconds / 60) 分钟")
                     .font(.ink(12.5)).foregroundStyle(Ink.sub)
             }
+            row("休息提醒", hint: "休息结束的通知可直接开始下一段") {
+                VStack(alignment: .leading, spacing: 6) {
+                    InkToggle(isOn: Binding(get: { model.breakNudgeEnabled }, set: { model.breakNudgeEnabled = $0 }),
+                              label: "休息时还在用电脑就提醒我")
+                    Text("休息开始 \(Int(BreakNudge.grace)) 秒后，累计操作电脑超过 \(Int(BreakNudge.activeThreshold / 60)) 分钟时提醒一次。休息结束的通知带「继续：上一段」和「开始：下一个任务」按钮。")
+                        .font(.ink(11)).foregroundStyle(Ink.sub).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             row("到点", hint: "专注或休息的倒计时走完时") {
                 VStack(alignment: .leading, spacing: 6) {
                     InkToggle(isOn: Binding(get: { model.autoFinish }, set: { model.autoFinish = $0 }), label: "自动结束")

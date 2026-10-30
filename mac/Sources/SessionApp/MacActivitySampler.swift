@@ -17,6 +17,9 @@ final class MacActivitySampler: ActivitySampler {
         return hid
     }
 
+    /// 距上次键鼠输入的秒数，不看电源断言（休息提醒用：休息时看视频不算在干活）。
+    static func inputIdleSeconds() -> TimeInterval { hidIdleSeconds() }
+
     /// 只在已经接近闲置阈值时才去查电源断言，避免每 2 秒都查。
     private static let assertionCheckFloor: TimeInterval = 60
 

@@ -86,6 +86,7 @@ public final class TimerEngine {
     public private(set) var recovered: CompletedFocus?
     public var onCompleted: ((CompletedFocus) -> Void)?
     /// `autoFinish` 关闭时，专注/休息到点后调用一次（传入当时的阶段），阶段本身不变。
+    /// `autoFinish` 打开时，休息到点自动结束前也调用一次（传入休息阶段），用来提醒回来。
     public var onTimeUp: ((TimerPhase) -> Void)?
     /// true：到点自动结束（专注入库、休息回到空闲）。false：停在原阶段计超时，等用户手动完成 / 结束休息。
     public var autoFinish: Bool
@@ -213,7 +214,9 @@ public final class TimerEngine {
             let completed = finish(run)
             onCompleted?(completed)
         case .breaking(_, let until) where clock.now >= until:
+            let ended = phase
             setPhase(.idle)
+            onTimeUp?(ended)
         default:
             break
         }
