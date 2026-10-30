@@ -8,3 +8,5 @@ xcuserdata/
 .build/
 .wrangler/
 .dev.vars*
+# d1:export / d1:seed 的输出，含加密的 Todoist token
+d1-*.sql
