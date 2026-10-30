@@ -81,6 +81,12 @@ private struct Sidebar: View {
     }
 
     private var todaySeconds: Int { model.todaySessions.map(\.actualSeconds).reduce(0, +) }
+    /// 上周同一天到此刻为止的专注秒数。
+    private var lastWeekSeconds: Int {
+        let moment = SameTimeComparison.reference(for: Date(), calendar: .current)
+        return SameTimeComparison.focusedSeconds(model.lastWeekSameDaySessions, until: moment, calendar: .current)
+    }
+    private static let weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
     private var avgScore: Int? {
         let scores = model.todaySessions.compactMap { model.evaluations[$0.id]?.focusScore }
         return scores.isEmpty ? nil : scores.reduce(0, +) / scores.count
@@ -155,6 +161,15 @@ private struct Sidebar: View {
             .frame(height: 4)
             .background(Ink.ruleSoft)
             .help("每日目标 \(StatsFormat.duration(seconds: dailyTarget * 60))")
+            if !model.lastWeekSameDaySessions.isEmpty {
+                let diff = (todaySeconds - lastWeekSeconds) / 60
+                HStack(spacing: 4) {
+                    Text("上\(Self.weekdayNames[Calendar.current.component(.weekday, from: Date()) - 1])此时 \(lastWeekSeconds / 60) 分")
+                        .foregroundStyle(Ink.sub)
+                    Text(diff >= 0 ? "+\(diff)" : "−\(-diff)").foregroundStyle(diff >= 0 ? Ink.ink : Ink.now)
+                }
+                .font(.inkMono(10)).help("和上周同一天、同一时刻比")
+            }
             HStack(spacing: 14) {
                 stat("\(model.todaySessions.count)", "段")
                 stat(avgScore.map(String.init) ?? "—", "专注度")

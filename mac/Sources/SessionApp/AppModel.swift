@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     @Published var todaySessions: [SessionRecord] = []
     /// 近 30 天本机记录算出的预估准确度：开始面板的时长建议、统计页的「预估」面板用。
     @Published private(set) var estimates = Estimates.empty
+    /// 上周同一天的专注记录：侧栏「上周此时」用。
+    @Published private(set) var lastWeekSameDaySessions: [SessionRecord] = []
     @Published var unsynced = 0
     @Published var accessibilityMissing = false
     @Published var errorMessage: String?
@@ -581,6 +583,8 @@ final class AppModel: ObservableObject {
         let start = Calendar.current.startOfDay(for: Date())
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         todaySessions = (try? store?.sessions(from: start, to: end)) ?? []
+        let weekAgo = SameTimeComparison.reference(for: start, calendar: .current)
+        lastWeekSameDaySessions = (try? store?.sessions(from: weekAgo, to: Calendar.current.date(byAdding: .day, value: 1, to: weekAgo) ?? start)) ?? []
         let since = Calendar.current.date(byAdding: .day, value: -Estimates.windowDays, to: start) ?? start
         estimates = Estimates(sessions: (try? store?.sessions(from: since, to: end)) ?? [])
     }

@@ -45,6 +45,49 @@ final class StatsPresenterTests: XCTestCase {
         XCTAssertEqual(StatsPeriod(scope: .week, offset: -2).title(now: now, calendar: cal), "10月5日 – 10月11日")
     }
 
+    func testMonthPeriod() {
+        let now = date("2026-10-25T10:30:00+08:00")
+        let r = StatsPeriod(scope: .month).interval(now: now, calendar: cal)
+        XCTAssertEqual(r.from, date("2026-10-01T00:00:00+08:00"))
+        XCTAssertEqual(r.to, date("2026-11-01T00:00:00+08:00"))
+        let prev = StatsPeriod(scope: .month, offset: -1).interval(now: now, calendar: cal)
+        XCTAssertEqual(prev.from, date("2026-09-01T00:00:00+08:00"))
+        XCTAssertEqual(prev.to, r.from)
+        XCTAssertEqual(StatsPeriod(scope: .month).title(now: now, calendar: cal), "本月")
+        XCTAssertEqual(StatsPeriod(scope: .month, offset: -1).title(now: now, calendar: cal), "上月")
+        XCTAssertEqual(StatsPeriod(scope: .month, offset: -10).title(now: now, calendar: cal), "2025年12月")
+        XCTAssertEqual(StatsPeriod(scope: .month).dates(now: now, calendar: cal), "10月1日 – 10月31日")
+    }
+
+    func testCumulativeSeries() throws {
+        let days = try JSONDecoder().decode([StatsSummary.Day].self, from: Data(#"[{"date":"2026-10-19","focusSeconds":600,"sessionCount":1,"avgFocusScore":null},{"date":"2026-10-20","focusSeconds":1200,"sessionCount":1,"avgFocusScore":null},{"date":"2026-10-21","focusSeconds":600,"sessionCount":1,"avgFocusScore":null}]"#.utf8))
+        let all = StatsChartData.cumulativeByDay(days)
+        XCTAssertEqual(all.map(\.minutes), [0, 10, 30, 40])
+        XCTAssertEqual(StatsChartData.cumulativeByDay(days, count: 2).map(\.index), [0, 1, 2])
+        XCTAssertEqual(StatsChartData.value(all, at: 2), 30)
+        XCTAssertEqual(StatsChartData.value(all, at: 9), 40)
+
+        let hours = try JSONDecoder().decode([StatsSummary.HourShare].self, from: Data(#"[{"date":"d","hour":9,"focusSeconds":1800},{"date":"d","hour":14,"focusSeconds":600}]"#.utf8))
+        let h = StatsChartData.cumulativeByHour(hours, through: 12)
+        XCTAssertEqual(h.count, 14)
+        XCTAssertEqual(h.last?.minutes, 30)
+        XCTAssertEqual(StatsChartData.cumulativeByHour(hours).last?.minutes, 40)
+    }
+
+    func testSameTimeLastWeekCountsOnlyElapsedPart() {
+        let moment = date("2026-10-22T10:00:00+08:00")
+        func s(_ start: String, _ secs: Int) -> SessionRecord {
+            SessionRecord(id: start, title: "t", categoryId: nil, source: .custom, todoistTaskId: nil, entryId: nil,
+                          plannedSeconds: secs, actualSeconds: secs, startedAt: date(start), endedAt: date(start).addingTimeInterval(TimeInterval(secs)))
+        }
+        let sessions = [s("2026-10-22T08:00:00+08:00", 1500),   // 整段
+                        s("2026-10-22T09:50:00+08:00", 1500),   // 只算 10 分钟
+                        s("2026-10-22T11:00:00+08:00", 1500),   // 之后
+                        s("2026-10-21T23:00:00+08:00", 1500)]   // 前一天
+        XCTAssertEqual(SameTimeComparison.focusedSeconds(sessions, until: moment, calendar: cal), 1500 + 600)
+        XCTAssertEqual(SameTimeComparison.reference(for: moment, calendar: cal), date("2026-10-15T10:00:00+08:00"))
+    }
+
     func testTzOffsetMinutes() {
         XCTAssertEqual(StatsPeriod.tzOffsetMinutes(calendar: cal, at: date("2026-10-25T00:00:00+08:00")), 480)
     }

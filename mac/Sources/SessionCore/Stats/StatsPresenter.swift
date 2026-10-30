@@ -1,10 +1,12 @@
 import Foundation
 
-/// 统计页的粒度：日 / 周。
+/// 统计页的粒度：日 / 周 / 月。
 public enum StatsScope: String, CaseIterable, Identifiable, Sendable {
-    case day, week
+    case day, week, month
     public var id: String { rawValue }
-    public var title: String { self == .day ? "日" : "周" }
+    public var title: String {
+        switch self { case .day: "日"; case .week: "周"; case .month: "月" }
+    }
 }
 
 /// 统计页当前看的那一天 / 那一周；`offset` 0 是今天 / 本周，-1 是昨天 / 上周。区间为 [from, to)。
@@ -26,6 +28,10 @@ public struct StatsPeriod: Hashable, Sendable {
             let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? today
             let from = calendar.date(byAdding: .weekOfYear, value: offset, to: start)!
             return (from, calendar.date(byAdding: .weekOfYear, value: 1, to: from)!)
+        case .month:
+            let start = calendar.dateInterval(of: .month, for: now)?.start ?? today
+            let from = calendar.date(byAdding: .month, value: offset, to: start)!
+            return (from, calendar.date(byAdding: .month, value: 1, to: from)!)
         }
     }
 
@@ -36,6 +42,11 @@ public struct StatsPeriod: Hashable, Sendable {
         case (.day, -1): "昨天"
         case (.week, 0): "本周"
         case (.week, -1): "上周"
+        case (.month, 0): "本月"
+        case (.month, -1): "上月"
+        case (.month, _):
+            { let c = calendar.dateComponents([.year, .month], from: interval(now: now, calendar: calendar).from)
+              return "\(c.year!)年\(c.month!)月" }()
         default: dates(now: now, calendar: calendar)
         }
     }
@@ -51,7 +62,7 @@ public struct StatsPeriod: Hashable, Sendable {
         case .day:
             let weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][calendar.component(.weekday, from: r.from) - 1]
             return "\(md(r.from)) \(weekday)"
-        case .week:
+        case .week, .month:
             return "\(md(r.from)) – \(md(calendar.date(byAdding: .day, value: -1, to: r.to)!))"
         }
     }
@@ -113,6 +124,13 @@ public enum StatsChartData {
         public let fraction: Double
     }
 
+    /// 累计曲线上的一点：`index` 是第几个小时 / 第几天结束时（0 = 起点）。
+    public struct CumulativePoint: Equatable, Identifiable, Sendable {
+        public let index: Int
+        public let minutes: Double
+        public var id: Int { index }
+    }
+
     public struct HourPoint: Equatable, Identifiable, Sendable {
         public let hour: Int
         public let minutes: Double
@@ -135,6 +153,30 @@ public enum StatsChartData {
         days.compactMap { d in
             parse(d.date, calendar: calendar).map { DailyPoint(date: $0, minutes: Double(d.focusSeconds) / 60) }
         }
+    }
+
+    /// 周 / 月：每天结束时的累计专注分钟，从 0 起。`count` 限定画到第几天（本期只画到今天）。
+    public static func cumulativeByDay(_ days: [StatsSummary.Day], count: Int? = nil) -> [CumulativePoint] {
+        var total = 0.0
+        return [CumulativePoint(index: 0, minutes: 0)] + days.prefix(count ?? days.count).enumerated().map { i, d in
+            total += Double(d.focusSeconds) / 60
+            return CumulativePoint(index: i + 1, minutes: total)
+        }
+    }
+
+    /// 日：每个整点结束时的累计专注分钟，从 0 点起。`through` 限定画到几点（今天只画到当前小时）。
+    public static func cumulativeByHour(_ hours: [StatsSummary.HourShare], through lastHour: Int = 23) -> [CumulativePoint] {
+        var total = 0.0
+        let perHour = hourly(hours)
+        return [CumulativePoint(index: 0, minutes: 0)] + perHour.prefix(max(0, min(23, lastHour)) + 1).map { p in
+            total += p.minutes
+            return CumulativePoint(index: p.hour + 1, minutes: total)
+        }
+    }
+
+    /// 曲线在 `index` 处（或之前最后一点）的累计值，用于「上期同期」。
+    public static func value(_ points: [CumulativePoint], at index: Int) -> Double {
+        points.last { $0.index <= index }?.minutes ?? 0
     }
 
     /// 日视图：0–23 点每小时的专注分钟，没有记录的小时补 0。

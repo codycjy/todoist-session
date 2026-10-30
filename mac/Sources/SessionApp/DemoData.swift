@@ -11,8 +11,10 @@ enum DemoData {
     static var selectedTaskId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SELECT"] : nil }
     static var selectedSessionId: String? { enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SESSION"] : nil }
     static var editsSession: Bool { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_EDIT"] == "1" }
-    /// 统计页初始粒度（截图用）：`SESSION_DEMO_SCOPE=week`。
-    static var statsScope: StatsScope { enabled && ProcessInfo.processInfo.environment["SESSION_DEMO_SCOPE"] == "week" ? .week : .day }
+    /// 统计页初始粒度（截图用）：`SESSION_DEMO_SCOPE=week|month`。
+    static var statsScope: StatsScope {
+        enabled ? ProcessInfo.processInfo.environment["SESSION_DEMO_SCOPE"].flatMap(StatsScope.init(rawValue:)) ?? .day : .day
+    }
     static var initialTab: String? { ProcessInfo.processInfo.environment["SESSION_DEMO_TAB"] }
     static var appearance: NSAppearance.Name? {
         switch ProcessInfo.processInfo.environment["SESSION_DEMO_APPEARANCE"] {
