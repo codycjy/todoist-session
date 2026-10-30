@@ -21,13 +21,13 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
   // 正在处理的 session id；与处理前的状态复查一起避免重复领取
   const inFlight = new Set<string>()
 
-  function loadInput(sessionId: string): EvalInput | null {
-    const s = db.select().from(sessions).where(eq(sessions.id, sessionId)).get()
+  async function loadInput(sessionId: string): Promise<EvalInput | null> {
+    const s = await db.select().from(sessions).where(eq(sessions.id, sessionId)).get()
     if (!s) return null
     const category = s.categoryId
-      ? db.select({ name: categories.name }).from(categories).where(eq(categories.id, s.categoryId)).get()
+      ? await db.select({ name: categories.name }).from(categories).where(eq(categories.id, s.categoryId)).get()
       : undefined
-    const spans = db.select().from(activitySpans).where(eq(activitySpans.sessionId, sessionId))
+    const spans = await db.select().from(activitySpans).where(eq(activitySpans.sessionId, sessionId))
       .orderBy(asc(activitySpans.startedAt)).all()
     return {
       title: s.titleSnapshot,
@@ -46,9 +46,9 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
 
   async function process(sessionId: string): Promise<boolean> {
     // 轮到它时再复查一次：期间可能已被重置/终结
-    const row = db.select().from(evaluations).where(eq(evaluations.sessionId, sessionId)).get()
+    const row = await db.select().from(evaluations).where(eq(evaluations.sessionId, sessionId)).get()
     if (!row || row.status !== 'pending' || row.attempts >= MAX_ATTEMPTS) return false
-    const input = loadInput(sessionId)
+    const input = await loadInput(sessionId)
     const attempt = row.attempts + 1
     // 乐观并发：领取后若被重试（attempts/updated_at 变化）则本次结果作废
     const unchanged = and(
@@ -67,24 +67,24 @@ export function createEvalWorker({ db, evaluator, now }: EvalWorkerDeps): EvalWo
       }
     }
 
-    let changes: number
+    let changed: unknown[]
     if (result) {
-      changes = db.update(evaluations).set({
+      changed = await db.update(evaluations).set({
         status: 'done', attempts: attempt, focusScore: result.focusScore, summary: result.summary,
         distractions: result.distractions, lastError: null, updatedAt: new Date(now()),
-      }).where(unchanged).run().changes
+      }).where(unchanged).returning({ id: evaluations.sessionId }).all()
     } else {
-      changes = db.update(evaluations).set({
+      changed = await db.update(evaluations).set({
         status: attempt >= MAX_ATTEMPTS ? 'failed' : 'pending', attempts: attempt,
         lastError: error, updatedAt: new Date(now()),
-      }).where(unchanged).run().changes
+      }).where(unchanged).returning({ id: evaluations.sessionId }).all()
     }
-    return changes > 0
+    return changed.length > 0
   }
 
   return {
     async runOnce() {
-      const candidates = db.select({ sessionId: evaluations.sessionId }).from(evaluations)
+      const candidates = await db.select({ sessionId: evaluations.sessionId }).from(evaluations)
         .where(and(eq(evaluations.status, 'pending'), lt(evaluations.attempts, MAX_ATTEMPTS)))
         .orderBy(asc(evaluations.createdAt)).limit(BATCH_SIZE).all()
       let processed = 0

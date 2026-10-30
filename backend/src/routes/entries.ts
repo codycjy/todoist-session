@@ -1,6 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
 import type { Db } from '../db/client.js'
@@ -13,8 +12,8 @@ const toDto = (e: Entry) => ({ id: e.id, title: e.title, categoryId: e.categoryI
 export function entryRoutes(db: Db, now: () => number) {
   const r = new Hono<AppEnv>()
 
-  r.get('/', (c) => {
-    const rows = db
+  r.get('/', async (c) => {
+    const rows = await db
       .select()
       .from(entries)
       .where(eq(entries.userId, c.get('user').id))
@@ -31,7 +30,7 @@ export function entryRoutes(db: Db, now: () => number) {
     const { title, categoryId } = parsed.data
 
     if (categoryId) {
-      const owned = db
+      const owned = await db
         .select()
         .from(categories)
         .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
@@ -40,7 +39,7 @@ export function entryRoutes(db: Db, now: () => number) {
     }
 
     const lastUsedAt = new Date(now())
-    const existing = db
+    const existing = await db
       .select()
       .from(entries)
       .where(
@@ -53,11 +52,11 @@ export function entryRoutes(db: Db, now: () => number) {
       .get()
 
     if (existing) {
-      db.update(entries).set({ lastUsedAt }).where(eq(entries.id, existing.id)).run()
+      await db.update(entries).set({ lastUsedAt }).where(eq(entries.id, existing.id)).run()
       return c.json({ entry: toDto(existing) })
     }
-    const row = { id: randomUUID(), userId, title, categoryId, lastUsedAt }
-    db.insert(entries).values(row).run()
+    const row = { id: crypto.randomUUID(), userId, title, categoryId, lastUsedAt }
+    await db.insert(entries).values(row).run()
     return c.json({ entry: toDto(row) })
   })
 

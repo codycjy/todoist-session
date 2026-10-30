@@ -8,10 +8,10 @@ import { rangeQuery } from './range.js'
 export function sessionRoutes(db: Db) {
   const r = new Hono<AppEnv>()
 
-  r.get('/', (c) => {
+  r.get('/', async (c) => {
     const q = rangeQuery.safeParse({ from: c.req.query('from'), to: c.req.query('to') })
     if (!q.success) return c.json({ error: 'BAD_REQUEST' }, 400)
-    const rows = db.select({ s: sessions, e: evaluations }).from(sessions)
+    const rows = await db.select({ s: sessions, e: evaluations }).from(sessions)
       .leftJoin(evaluations, eq(evaluations.sessionId, sessions.id))
       .where(and(eq(sessions.userId, c.get('user').id), gte(sessions.startedAt, new Date(q.data.from)), lt(sessions.startedAt, new Date(q.data.to))))
       .orderBy(asc(sessions.startedAt)).all()
@@ -40,15 +40,15 @@ const RETRY_DONE_COOLDOWN_MS = 60_000
 export function evaluationRoutes(db: Db, now: () => number) {
   const r = new Hono<AppEnv>()
 
-  r.post('/:sessionId/retry', (c) => {
+  r.post('/:sessionId/retry', async (c) => {
     const where = and(eq(evaluations.sessionId, c.req.param('sessionId')), eq(evaluations.userId, c.get('user').id))
-    const cur = db.select({ status: evaluations.status, updatedAt: evaluations.updatedAt }).from(evaluations).where(where).get()
+    const cur = await db.select({ status: evaluations.status, updatedAt: evaluations.updatedAt }).from(evaluations).where(where).get()
     if (!cur) return c.json({ error: 'NOT_FOUND' }, 404)
     // 已在排队：幂等，不重置 attempts
     if (cur.status === 'pending') return c.json({ status: 'pending' }, 202)
     // 已完成的评估 60 秒内只能重试一次
     if (cur.status === 'done' && now() - cur.updatedAt.getTime() < RETRY_DONE_COOLDOWN_MS) return c.json({ error: 'TOO_MANY' }, 429)
-    const updated = db.update(evaluations)
+    const updated = await db.update(evaluations)
       .set({ status: 'pending', attempts: 0, lastError: null, updatedAt: new Date(now()) })
       .where(where).returning({ id: evaluations.sessionId }).all()
     if (updated.length === 0) return c.json({ error: 'NOT_FOUND' }, 404)

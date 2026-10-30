@@ -1,6 +1,5 @@
 import { and, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
 import type { Db } from '../db/client.js'
@@ -30,16 +29,17 @@ export const toCategoryDto = (c: typeof categories.$inferSelect, withArchived = 
 export function categoryRoutes(db: Db) {
   const r = new Hono<AppEnv>()
 
-  r.get('/', (c) => {
+  r.get('/', async (c) => {
     const all = c.req.query('all') === '1'
-    return c.json({ categories: listCategories(db, c.get('user').id, all).map((row) => toCategoryDto(row, all)) })
+    const rows = await listCategories(db, c.get('user').id, all)
+    return c.json({ categories: rows.map((row) => toCategoryDto(row, all)) })
   })
 
   r.post('/', async (c) => {
     const parsed = body.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'BAD_REQUEST' }, 400)
-    const row = { id: randomUUID(), userId: c.get('user').id, todoistProjectId: null, ...parsed.data }
-    db.insert(categories).values(row).run()
+    const row = { id: crypto.randomUUID(), userId: c.get('user').id, todoistProjectId: null, ...parsed.data }
+    await db.insert(categories).values(row).run()
     return c.json({ category: toCategoryDto({ ...row, archived: false }) })
   })
 
@@ -47,15 +47,15 @@ export function categoryRoutes(db: Db) {
     const parsed = patch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'BAD_REQUEST' }, 400)
     const mine = and(eq(categories.id, c.req.param('id')), eq(categories.userId, c.get('user').id), eq(categories.archived, false))
-    const row = db.update(categories).set(parsed.data).where(mine).returning().get()
+    const row = await db.update(categories).set(parsed.data).where(mine).returning().get()
     if (!row) return c.json({ error: 'NOT_FOUND' }, 404)
     return c.json({ category: toCategoryDto(row) })
   })
 
   /** 删除只是归档：历史专注仍能显示分类名，但不再出现在可选列表里。 */
-  r.delete('/:id', (c) => {
+  r.delete('/:id', async (c) => {
     const mine = and(eq(categories.id, c.req.param('id')), eq(categories.userId, c.get('user').id))
-    const row = db.update(categories).set({ archived: true }).where(mine).returning().get()
+    const row = await db.update(categories).set({ archived: true }).where(mine).returning().get()
     if (!row) return c.json({ error: 'NOT_FOUND' }, 404)
     return c.json({ ok: true })
   })

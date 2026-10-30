@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
@@ -55,14 +55,14 @@ export function settingsRoutes(db: Db) {
     const patch = patchSchema.safeParse(await c.req.json().catch(() => null))
     if (!patch.success) return c.json({ error: 'BAD_REQUEST' }, 400)
     const userId = c.get('user').id
-    // 读-改-写放在同一事务里，避免并发 PUT 互相覆盖
-    const merged = db.transaction((tx) => {
-      const row = tx.select({ settings: users.settings }).from(users).where(eq(users.id, userId)).get()
-      const next = { ...(row?.settings ?? {}), ...patch.data }
-      tx.update(users).set({ settings: next }).where(eq(users.id, userId)).run()
-      return next
-    })
-    return c.json(resolve(merged))
+    // 一条 UPDATE 里按顶层字段合并（json_set 整体替换每个字段），并发 PUT 不会互相覆盖
+    const keys = Object.keys(patch.data) as (keyof Settings)[]
+    if (keys.length === 0) return c.json(resolve(c.get('user').settings))
+    const pairs = sql.join(keys.map((k) => sql`${'$.' + k}, json(${JSON.stringify(patch.data[k])})`), sql`, `)
+    const row = await db.update(users)
+      .set({ settings: sql`json_set(${users.settings}, ${pairs})` })
+      .where(eq(users.id, userId)).returning({ settings: users.settings }).get()
+    return c.json(resolve(row?.settings ?? {}))
   })
 
   return r

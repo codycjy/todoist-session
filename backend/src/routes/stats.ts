@@ -47,7 +47,7 @@ const avg = (scores: number[]) => (scores.length ? Math.round(scores.reduce((a, 
 export function statsRoutes(db: Db) {
   const r = new Hono<AppEnv>()
 
-  r.get('/', (c) => {
+  r.get('/', async (c) => {
     const q = rangeQuery.safeParse({ from: c.req.query('from'), to: c.req.query('to') })
     const tzRaw = c.req.query('tzOffsetMinutes')
     const tz = tzRaw === undefined ? ({ success: true, data: 0 } as const) : tzQuery.safeParse(tzRaw)
@@ -60,7 +60,7 @@ export function statsRoutes(db: Db) {
     const userId = c.get('user').id
     const inRange = and(eq(sessions.userId, userId), gte(sessions.startedAt, new Date(from)), lt(sessions.startedAt, new Date(to)))
 
-    const rows = db.select({
+    const rows = await db.select({
       startedAt: sessions.startedAt, actualSeconds: sessions.actualSeconds, plannedSeconds: sessions.plannedSeconds,
       categoryId: sessions.categoryId,
       status: evaluations.status, focusScore: evaluations.focusScore,
@@ -105,7 +105,7 @@ export function statsRoutes(db: Db) {
       if (done) day.scores.push(row.focusScore!)
     }
 
-    const spanMs = db.select({
+    const spanMs = await db.select({
       kind: activitySpans.kind,
       ms: sql<number>`coalesce(sum(${activitySpans.endedAt} - ${activitySpans.startedAt}), 0)`,
     }).from(activitySpans).innerJoin(sessions, eq(sessions.id, activitySpans.sessionId))
@@ -115,7 +115,7 @@ export function statsRoutes(db: Db) {
     // 活跃时间按网站（有域名时）或 App 归类
     const appName = sql<string>`coalesce(${activitySpans.urlHost}, ${activitySpans.appName})`
     const appMs = sql<number>`sum(${activitySpans.endedAt} - ${activitySpans.startedAt})`
-    const topApps = db.select({ name: appName, ms: appMs })
+    const topApps = await db.select({ name: appName, ms: appMs })
       .from(activitySpans).innerJoin(sessions, eq(sessions.id, activitySpans.sessionId))
       .where(and(inRange, eq(activitySpans.kind, 'active'), isNotNull(appName)))
       .groupBy(appName).orderBy(desc(appMs)).limit(TOP_APPS).all()

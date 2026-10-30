@@ -10,7 +10,7 @@ export function auth(db: Db): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')
     const user = match?.[1]
-      ? db.select().from(users).where(eq(users.apiTokenHash, hashToken(match[1]))).get()
+      ? await db.select().from(users).where(eq(users.apiTokenHash, hashToken(match[1]))).get()
       : undefined
     if (!user) return c.json({ error: 'UNAUTHORIZED' }, 401)
     c.set('user', user)

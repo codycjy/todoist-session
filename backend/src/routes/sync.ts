@@ -1,8 +1,8 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../auth.js'
-import type { Db } from '../db/client.js'
+import { atomic, type Db } from '../db/client.js'
 import { activitySpans, categories, entries, evaluations, sessions } from '../db/schema.js'
 
 const id = z.string().min(1).max(64)
@@ -36,8 +36,9 @@ const sessionSchema = z.object({
 const bodySchema = z.object({ sessions: z.array(sessionSchema).min(1).max(50) })
 const deletionSchema = z.object({ ids: z.array(id).min(1).max(100) })
 
+const ID_CHUNK = 50
+
 type Rejection = { id: string; reason: 'CONFLICT' | 'INVALID_TIME' }
-const SPAN_CHUNK = 200 // 11 列 × 200 = 2200 个绑定参数，低于 SQLite 上限
 
 export interface SyncOptions {
   now: () => number
@@ -45,16 +46,20 @@ export interface SyncOptions {
   promptVersion: string
 }
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
-
-function insertSpans(tx: Tx, s: z.infer<typeof sessionSchema>) {
-  for (let i = 0; i < s.spans.length; i += SPAN_CHUNK) {
-    tx.insert(activitySpans).values(
-      s.spans.slice(i, i + SPAN_CHUNK).map((p) => ({
-        ...p, sessionId: s.id, startedAt: new Date(p.startedAt), endedAt: new Date(p.endedAt),
-      })),
-    ).onConflictDoNothing().run()
-  }
+/**
+ * 一条语句插入一个 session 的全部 span：span 以 JSON 作为单个参数传入，由 json_each 展开。
+ * D1 每条语句最多 100 个绑定参数，逐行绑定的话 5000 条 span 要拆成几百条语句。
+ */
+function insertSpans(db: Db, s: z.infer<typeof sessionSchema>) {
+  const rows = JSON.stringify(s.spans)
+  return db.run(sql`
+    INSERT OR IGNORE INTO activity_spans
+      (id, session_id, kind, app_bundle_id, app_name, window_title, url_host, url_path, started_at, ended_at, was_blocked)
+    SELECT json_extract(value, '$.id'), ${s.id}, json_extract(value, '$.kind'), json_extract(value, '$.appBundleId'),
+      json_extract(value, '$.appName'), json_extract(value, '$.windowTitle'), json_extract(value, '$.urlHost'),
+      json_extract(value, '$.urlPath'), json_extract(value, '$.startedAt'), json_extract(value, '$.endedAt'),
+      json_extract(value, '$.wasBlocked')
+    FROM json_each(${rows})`)
 }
 
 export function syncRoutes(db: Db, opts: SyncOptions) {
@@ -71,55 +76,50 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
       const timesOk = s.endedAt >= s.startedAt && s.spans.every((p) => p.endedAt >= p.startedAt)
       if (!timesOk) { rejected.push({ id: s.id, reason: 'INVALID_TIME' }); continue }
 
-      const outcome = db.transaction((tx) => {
-        const existing = tx.select({ userId: sessions.userId, allowIdle: sessions.allowIdle }).from(sessions).where(eq(sessions.id, s.id)).get()
-        if (existing && existing.userId !== userId) return 'conflict'
+      const existing = await db.select({ userId: sessions.userId, allowIdle: sessions.allowIdle })
+        .from(sessions).where(eq(sessions.id, s.id)).get()
+      if (existing && existing.userId !== userId) { rejected.push({ id: s.id, reason: 'CONFLICT' }); continue }
 
-        const categoryId = s.categoryId &&
-          tx.select({ id: categories.id }).from(categories)
-            .where(and(eq(categories.id, s.categoryId), eq(categories.userId, userId))).get()
-          ? s.categoryId : null
+      const ownCategory = s.categoryId && await db.select({ id: categories.id }).from(categories)
+        .where(and(eq(categories.id, s.categoryId), eq(categories.userId, userId))).get()
+      const categoryId = ownCategory ? s.categoryId : null
 
-        if (existing) {
-          // 重传 = 客户端编辑过（标题、分类、时长、可闲置）：覆盖可编辑字段并替换 span。
-          // 评估一般保留；只有「可闲置」变了才重评，因为它改变了闲置该怎么算。
-          tx.update(sessions).set({
+      if (existing) {
+        // 重传 = 客户端编辑过（标题、分类、时长、可闲置）：覆盖可编辑字段并替换 span。
+        // 评估一般保留；只有「可闲置」变了才重评，因为它改变了闲置该怎么算。
+        const requeue = existing.allowIdle !== s.allowIdle
+        await atomic(db, [
+          () => db.update(sessions).set({
             titleSnapshot: s.title, categoryId, actualSeconds: s.actualSeconds, endedAt: new Date(s.endedAt),
             allowIdle: s.allowIdle,
-          }).where(eq(sessions.id, s.id)).run()
-          if (existing.allowIdle !== s.allowIdle) {
-            tx.update(evaluations)
-              .set({ status: 'pending', attempts: 0, lastError: null, updatedAt: new Date(opts.now()) })
-              .where(eq(evaluations.sessionId, s.id)).run()
-          }
-          tx.delete(activitySpans).where(eq(activitySpans.sessionId, s.id)).run()
-          insertSpans(tx, s)
-          return 'ok'
-        }
+          }).where(eq(sessions.id, s.id)),
+          ...(requeue ? [() => db.update(evaluations)
+            .set({ status: 'pending' as const, attempts: 0, lastError: null, updatedAt: new Date(opts.now()) })
+            .where(eq(evaluations.sessionId, s.id))] : []),
+          () => db.delete(activitySpans).where(eq(activitySpans.sessionId, s.id)),
+          () => insertSpans(db, s),
+        ])
+        accepted.push(s.id)
+        continue
+      }
 
-        const entryId = s.entryId &&
-          tx.select({ id: entries.id }).from(entries)
-            .where(and(eq(entries.id, s.entryId), eq(entries.userId, userId))).get()
-          ? s.entryId : null
-
-        tx.insert(sessions).values({
+      const ownEntry = s.entryId && await db.select({ id: entries.id }).from(entries)
+        .where(and(eq(entries.id, s.entryId), eq(entries.userId, userId))).get()
+      const entryId = ownEntry ? s.entryId : null
+      const at = new Date(opts.now())
+      await atomic(db, [
+        () => db.insert(sessions).values({
           id: s.id, userId, categoryId, source: s.source, todoistTaskId: s.todoistTaskId, entryId,
           titleSnapshot: s.title, plannedSeconds: s.plannedSeconds, actualSeconds: s.actualSeconds,
           startedAt: new Date(s.startedAt), endedAt: new Date(s.endedAt), allowIdle: s.allowIdle,
-        }).run()
-
-        const at = new Date(opts.now())
-        tx.insert(evaluations).values({
+        }).onConflictDoNothing(),
+        () => db.insert(evaluations).values({
           sessionId: s.id, userId, model: opts.model, promptVersion: opts.promptVersion,
           createdAt: at, updatedAt: at,
-        }).run()
-
-        insertSpans(tx, s)
-        return 'ok'
-      })
-
-      if (outcome === 'ok') accepted.push(s.id)
-      else rejected.push({ id: s.id, reason: 'CONFLICT' })
+        }).onConflictDoNothing(),
+        () => insertSpans(db, s),
+      ])
+      accepted.push(s.id)
     }
     return c.json({ accepted, rejected })
   })
@@ -130,16 +130,18 @@ export function syncRoutes(db: Db, opts: SyncOptions) {
     const parsed = deletionSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'BAD_REQUEST' }, 400)
     const userId = c.get('user').id
-    db.transaction((tx) => {
-      for (const sid of parsed.data.ids) {
-        const own = tx.select({ id: sessions.id }).from(sessions)
-          .where(and(eq(sessions.id, sid), eq(sessions.userId, userId))).get()
-        if (!own) continue
-        tx.delete(activitySpans).where(eq(activitySpans.sessionId, sid)).run()
-        tx.delete(evaluations).where(eq(evaluations.sessionId, sid)).run()
-        tx.delete(sessions).where(eq(sessions.id, sid)).run()
-      }
-    })
+    // 分块：D1 每条语句最多 100 个绑定参数
+    for (let i = 0; i < parsed.data.ids.length; i += ID_CHUNK) {
+      const ids = parsed.data.ids.slice(i, i + ID_CHUNK)
+      const own = (await db.select({ id: sessions.id }).from(sessions)
+        .where(and(eq(sessions.userId, userId), inArray(sessions.id, ids))).all()).map((r) => r.id)
+      if (own.length === 0) continue
+      await atomic(db, [
+        () => db.delete(activitySpans).where(inArray(activitySpans.sessionId, own)),
+        () => db.delete(evaluations).where(inArray(evaluations.sessionId, own)),
+        () => db.delete(sessions).where(and(eq(sessions.userId, userId), inArray(sessions.id, own))),
+      ])
+    }
     return c.json({ deleted: parsed.data.ids })
   })
 
