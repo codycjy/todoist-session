@@ -2,6 +2,8 @@ import type { EvalInput, EvalSpan } from './types.js'
 
 export const MAX_TITLE_CHARS = 120
 export const MAX_SPANS = 200
+/** 短于这个秒数的活动（切窗口路过、点一下通知）不送给模型；被拦截的仍然保留 */
+export const MIN_SPAN_SECONDS = 15
 
 export const SYSTEM_PROMPT = [
   'You evaluate how focused a person was during one timed work session.',
@@ -73,8 +75,14 @@ export function buildTimeline(spans: EvalSpan[], sessionStart: number): string {
   return lines.join('\n')
 }
 
+/** 去掉 15 秒以下的片段，被拦截的保留：拦截会立刻切走，时长本来就短，但它是分心的信号 */
+export function significantSpans(spans: EvalSpan[]): EvalSpan[] {
+  return spans.filter((s) => s.wasBlocked || s.endedAt - s.startedAt >= MIN_SPAN_SECONDS * 1000)
+}
+
 export function buildUserPrompt(input: EvalInput): string {
-  const timeline = input.spans.length > 0 ? buildTimeline(input.spans, input.startedAt) : '(no activity recorded)'
+  const spans = significantSpans(input.spans)
+  const timeline = spans.length > 0 ? buildTimeline(spans, input.startedAt) : '(no activity recorded)'
   return [
     `Task: ${sanitize(input.title)}`,
     `Category: ${sanitize(input.categoryName) || '未分类'}`,
