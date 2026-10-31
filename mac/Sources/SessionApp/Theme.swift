@@ -193,6 +193,33 @@ struct InkChip: View {
     }
 }
 
+/// 几个选项的滑块开关：墨色块滑到选中的那一项下面。
+struct InkSegmented<T: Hashable>: View {
+    let options: [(T, String)]
+    @Binding var selection: T
+    @Namespace private var thumb
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options.indices, id: \.self) { i in
+                let (value, text) = options[i]
+                let on = value == selection
+                Button { withAnimation(.snappy(duration: 0.22)) { selection = value } } label: {
+                    Text(text).font(.inkMono(10, weight: on ? .semibold : .regular))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .foregroundStyle(on ? Ink.paper : Ink.sub)
+                        .background { if on { Rectangle().fill(Ink.ink).matchedGeometryEffect(id: "thumb", in: thumb) } }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .overlay(Rectangle().strokeBorder(Ink.rule, lineWidth: 1))
+        .fixedSize()
+    }
+}
+
 /// 开始面板 / 任务详情里的一行预估：「工作 · 近 30 天 18 次，实际中位 38m，常比计划多 52%」，附「用 40m」。
 struct EstimateHint: View {
     let estimate: Estimate

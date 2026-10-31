@@ -74,6 +74,13 @@ final class StatsPresenterTests: XCTestCase {
         XCTAssertEqual(StatsChartData.cumulativeByHour(hours).last?.minutes, 40)
     }
 
+    func testHoursOnOneDay() throws {
+        let hours = try JSONDecoder().decode([StatsSummary.HourShare].self, from: Data(#"[{"date":"2026-10-24","hour":9,"focusSeconds":1800},{"date":"2026-10-31","hour":9,"focusSeconds":600},{"date":"2026-10-24","hour":14,"focusSeconds":600}]"#.utf8))
+        let day = StatsChartData.hours(hours, on: "2026-10-24")
+        XCTAssertEqual(day.map(\.hour), [9, 14])
+        XCTAssertEqual(StatsChartData.cumulativeByHour(day, through: 10).last?.minutes, 30)
+    }
+
     func testSameTimeLastWeekCountsOnlyElapsedPart() {
         let moment = date("2026-10-22T10:00:00+08:00")
         func s(_ start: String, _ secs: Int) -> SessionRecord {

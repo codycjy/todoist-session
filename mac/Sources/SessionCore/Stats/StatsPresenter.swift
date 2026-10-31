@@ -179,6 +179,11 @@ public enum StatsChartData {
         points.last { $0.index <= index }?.minutes ?? 0
     }
 
+    /// 某一天的逐小时记录，用来画「今天对上周六」的当天累计。
+    public static func hours(_ hours: [StatsSummary.HourShare], on date: String) -> [StatsSummary.HourShare] {
+        hours.filter { $0.date == date }
+    }
+
     /// 日视图：0–23 点每小时的专注分钟，没有记录的小时补 0。
     public static func hourly(_ hours: [StatsSummary.HourShare]) -> [HourPoint] {
         var minutes = [Double](repeating: 0, count: 24)

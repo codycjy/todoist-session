@@ -18,8 +18,11 @@ struct StatsView: View {
     @State private var editingTarget = false
     @AppStorage(FocusTarget.dailyKey) private var dailyTarget = FocusTarget.dailyDefault
     @AppStorage(FocusTarget.weeklyKey) private var weeklyTarget = FocusTarget.weeklyDefault
+    @AppStorage("stats.compare") private var compare = CompareMode.slot
 
     private enum Phase { case loading, unavailable, loaded(StatsSummary, previous: StatsSummary?) }
+    /// 周 / 月和上期怎么比：同期（只比当天：今天对上周六 / 上月同一天）或整周 / 整月的累计。
+    private enum CompareMode: String { case slot, cumulative }
     private var calendar: Calendar { .current }
     private var isDay: Bool { period.scope == .day }
     private var isMonth: Bool { period.scope == .month }
@@ -119,7 +122,7 @@ struct StatsView: View {
                         panel("每日专注") { dailyChart(s) }
                         if !isMonth { panel("时段热力") { heatmap(s) } }
                     }
-                    panel("累计 · \(periodNames.current) vs \(periodNames.previous)") { raceChart(s, prev) }
+                    comparePanel(s, prev)
                     panel("分类分布") { categoryChart(s) }
                     panel("App / 网站") { appRanking(s) }
                     if !isDay { panel("专注度趋势") { trendChart(s) } }
@@ -245,6 +248,30 @@ struct StatsView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+    /// 对比面板。周 / 月标题右边可切「同期」（今天对上周六 / 上月同一天）和「累计」（整周 / 整月）；
+    /// 日视图本来就只有一天，只画累计。
+    private func comparePanel(_ s: StatsSummary, _ prev: StatsSummary?) -> some View {
+        let sameDay = !isDay && compare == .slot
+        let r = sameDay ? sameDayRace(s, prev) : cumulativeRace(s, prev)
+        let title = sameDay && r.hasPrevious ? "\(r.mineLabel) vs \(r.theirLabel.replacingOccurrences(of: "此时", with: ""))"
+                            : "\(periodNames.current) vs \(periodNames.previous)"
+        return VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("对比 · " + title).font(.inkMono(11, weight: .semibold)).tracking(1.2).foregroundStyle(Ink.sub)
+                    Spacer()
+                    if !isDay {
+                        InkSegmented(options: [(CompareMode.slot, "同期"), (.cumulative, "累计")], selection: $compare)
+                    }
+                }
+                .frame(height: 20)
+                Rectangle().fill(Ink.rule).frame(height: 1)
+            }
+            raceChart(r, days: s.days)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     // MARK: 图表
 
     private func hourlyChart(_ s: StatsSummary) -> some View {
@@ -334,83 +361,109 @@ struct StatsView: View {
         }
     }
 
-    /// 本期累计（实线，画到此刻）对上期累计（虚线）：看是领先还是落后。
-    private func raceChart(_ s: StatsSummary, _ prev: StatsSummary?) -> some View {
-        let now = Date()
+    /// 对比图的两条累计线和图例。
+    private struct Race {
+        let cur: [StatsChartData.CumulativePoint], old: [StatsChartData.CumulativePoint]
+        let mineLabel: String, theirLabel: String
+        let hasPrevious: Bool
+        /// true：横轴是一天 24 小时（日视图 / 同期）；false：横轴是这一周 / 月的每一天。
+        let hourly: Bool
+        let xMax: Int
+        var mine: Int { Int((cur.last?.minutes ?? 0) * 60) }
+        var theirs: Int { Int(StatsChartData.value(old, at: cur.last?.index ?? 0) * 60) }
+    }
+
+    /// 累计：本期累计（画到此刻）对上期累计。
+    private func cumulativeRace(_ s: StatsSummary, _ prev: StatsSummary?) -> Race {
         let live = period.offset == 0
-        let cur: [StatsChartData.CumulativePoint], old: [StatsChartData.CumulativePoint], xMax: Int
-        if isDay {
-            cur = StatsChartData.cumulativeByHour(s.byHour, through: live ? calendar.component(.hour, from: now) : 23)
-            old = prev.map { StatsChartData.cumulativeByHour($0.byHour) } ?? []
-            xMax = 24
-        } else {
-            let from = period.interval(now: now, calendar: calendar).from
-            let elapsed = live ? (calendar.dateComponents([.day], from: from, to: now).day ?? 0) + 1 : nil
-            cur = StatsChartData.cumulativeByDay(s.days, count: elapsed)
-            old = prev.map { StatsChartData.cumulativeByDay($0.days) } ?? []
-            xMax = max(s.days.count, prev?.days.count ?? 0)
-        }
-        let at = cur.last?.index ?? 0
-        let mine = Int((cur.last?.minutes ?? 0) * 60), theirs = Int(StatsChartData.value(old, at: at) * 60)
         let names = periodNames
-        // 日看分钟；周 / 月累计到几十上百小时，看小时。
-        let scale = isDay ? 1.0 : 60.0
+        let cur = isDay
+            ? StatsChartData.cumulativeByHour(s.byHour, through: live ? calendar.component(.hour, from: Date()) : 23)
+            : StatsChartData.cumulativeByDay(s.days, count: live ? elapsedDays : nil)
+        let old = prev.map { isDay ? StatsChartData.cumulativeByHour($0.byHour) : StatsChartData.cumulativeByDay($0.days) } ?? []
+        return Race(cur: cur, old: old, mineLabel: names.current, theirLabel: "\(names.previous)\(live ? "同期" : "")",
+                    hasPrevious: prev != nil, hourly: isDay, xMax: isDay ? 24 : max(s.days.count, prev?.days.count ?? 0))
+    }
+
+    /// 同期：只比当天——今天对上周六 / 上月 31 号，按小时累计。翻到过去的周期时比它的最后一天。
+    private func sameDayRace(_ s: StatsSummary, _ prev: StatsSummary?) -> Race {
+        let live = period.offset == 0
+        let i = live ? elapsedDays - 1 : s.days.count - 1
+        let mineDay = s.days.indices.contains(i) ? s.days[i] : nil
+        let theirDay = prev.flatMap { $0.days.indices.contains(i) ? $0.days[i] : nil }
+        let cur = mineDay.map { StatsChartData.cumulativeByHour(StatsChartData.hours(s.byHour, on: $0.date),
+                                                                through: live ? calendar.component(.hour, from: Date()) : 23) } ?? []
+        let old = theirDay.map { StatsChartData.cumulativeByHour(StatsChartData.hours(prev?.byHour ?? [], on: $0.date)) } ?? []
+        let date = mineDay.flatMap { StatsChartData.dailyFocus([$0], calendar: calendar).first?.date }
+        let name = date.map { isMonth ? "\(calendar.component(.day, from: $0))号" : "周" + weekday($0) } ?? ""
+        return Race(cur: cur, old: old, mineLabel: live ? "今天" : name,
+                    theirLabel: prev != nil && theirDay == nil ? "上月没有\(name)"
+                        : live ? (isMonth ? "上月" : "上") + name + "此时" : "前一\(unitName)" + name,
+                    hasPrevious: theirDay != nil, hourly: true, xMax: 24)
+    }
+
+    /// 本期累计（实线，画到此刻）对上期累计（虚线）：看是领先还是落后。
+    private func raceChart(_ r: Race, days: [StatsSummary.Day]) -> some View {
+        let live = period.offset == 0
+        // 一天内看分钟；周 / 月累计到几十上百小时，看小时。
+        let scale = r.hourly ? 1.0 : 60.0
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                legend(line: Ink.ink, dashed: false, "\(names.current) \(StatsFormat.duration(seconds: mine))")
-                legend(line: Ink.faint, dashed: true, "\(names.previous)\(live ? "同期" : "") \(StatsFormat.duration(seconds: theirs))")
+                legend(line: Ink.ink, dashed: false, "\(r.mineLabel) \(StatsFormat.duration(seconds: r.mine))")
+                legend(line: Ink.faint, dashed: true, "\(r.theirLabel) \(StatsFormat.duration(seconds: r.theirs))")
                 Spacer()
-                if prev != nil, mine + theirs > 0 {
-                    Text(mine >= theirs ? "领先 \(StatsFormat.duration(seconds: mine - theirs))" : "落后 \(StatsFormat.duration(seconds: theirs - mine))")
-                        .font(.inkMono(11, weight: .semibold)).foregroundStyle(mine >= theirs ? Ink.ink : Ink.now)
+                if r.hasPrevious, r.mine + r.theirs > 0 {
+                    Text(r.mine >= r.theirs ? "领先 \(StatsFormat.duration(seconds: r.mine - r.theirs))" : "落后 \(StatsFormat.duration(seconds: r.theirs - r.mine))")
+                        .font(.inkMono(11, weight: .semibold)).foregroundStyle(r.mine >= r.theirs ? Ink.ink : Ink.now)
                 }
             }
             Chart {
-                ForEach(old) { p in
+                ForEach(r.old) { p in
                     LineMark(x: .value("时刻", Double(p.index)), y: .value("累计", p.minutes / scale), series: .value("期", "prev"))
                         .foregroundStyle(Ink.faint).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 }
-                ForEach(cur) { p in
+                ForEach(r.cur) { p in
                     LineMark(x: .value("时刻", Double(p.index)), y: .value("累计", p.minutes / scale), series: .value("期", "cur"))
                         .foregroundStyle(Ink.ink).lineStyle(StrokeStyle(lineWidth: 2))
                 }
-                if let last = cur.last, live {
+                if let last = r.cur.last, live {
                     PointMark(x: .value("时刻", Double(last.index)), y: .value("累计", last.minutes / scale))
                         .symbol(.square).symbolSize(40).foregroundStyle(Ink.highlight)
                 }
             }
-            .chartXScale(domain: 0...Double(max(1, xMax)))
+            .chartXScale(domain: 0...Double(max(1, r.xMax)))
             .chartXAxis {
-                AxisMarks(values: raceTicks(xMax)) { v in
-                    AxisValueLabel(anchor: .top) { if let x = v.as(Double.self) { Text(raceLabel(x, days: s.days)) } }
+                AxisMarks(values: raceTicks(r)) { v in
+                    AxisValueLabel(anchor: .top) { if let x = v.as(Double.self) { Text(raceLabel(x, hourly: r.hourly, days: days)) } }
                         .font(.inkMono(9)).foregroundStyle(Ink.sub)
                 }
             }
             .chartYAxis { inkYAxis }
-            .chartYAxisLabel(isDay ? "分钟" : "小时", position: .topLeading)
+            .chartYAxisLabel(r.hourly ? "分钟" : "小时", position: .topLeading)
             .frame(height: 150)
         }
     }
 
-    /// 刻度放在每小时 / 每天的中间（第 i 段是 i-1…i）；日只标 0、6、12、18 点。
-    private func raceTicks(_ xMax: Int) -> [Double] {
-        switch period.scope {
-        case .day: [0, 6, 12, 18].map { Double($0) + 0.5 }
-        case .week: (1...max(1, xMax)).map { Double($0) - 0.5 }
-        case .month: Self.monthTicks.sorted().filter { $0 <= xMax }.map { Double($0) - 0.5 }
-        }
+    /// 本期已经过了几天（含今天）。
+    private var elapsedDays: Int {
+        let now = Date()
+        return (calendar.dateComponents([.day], from: period.interval(now: now, calendar: calendar).from, to: now).day ?? 0) + 1
     }
 
-    /// 日：几点；周：星期；月：几号。
-    private func raceLabel(_ x: Double, days: [StatsSummary.Day]) -> String {
+    /// 刻度放在每小时 / 每天的中间（第 i 段是 i-1…i）；一天只标 0、6、12、18 点。
+    private func raceTicks(_ r: Race) -> [Double] {
+        if r.hourly { return [0, 6, 12, 18].map { Double($0) + 0.5 } }
+        if isMonth { return Self.monthTicks.sorted().filter { $0 <= r.xMax }.map { Double($0) - 0.5 } }
+        return (1...max(1, r.xMax)).map { Double($0) - 0.5 }
+    }
+
+    /// 一天：几点；周：星期；月：几号。
+    private func raceLabel(_ x: Double, hourly: Bool, days: [StatsSummary.Day]) -> String {
         let i = Int(x.rounded(.down))   // 0 起：第几个小时 / 第几天
-        switch period.scope {
-        case .day: return "\(i)"
-        case .month: return "\(i + 1)"
-        case .week:
-            guard i < days.count, let d = StatsChartData.dailyFocus([days[i]], calendar: calendar).first?.date else { return "" }
-            return weekday(d)
-        }
+        if hourly { return "\(i)" }
+        if isMonth { return "\(i + 1)" }
+        guard i < days.count, let d = StatsChartData.dailyFocus([days[i]], calendar: calendar).first?.date else { return "" }
+        return weekday(d)
     }
 
     private func legend(line: Color, dashed: Bool, _ text: String) -> some View {
